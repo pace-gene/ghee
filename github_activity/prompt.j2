@@ -1,0 +1,31 @@
+Context:
+- Current Date: {{ current_date }}
+- User: {{ user_identity }}
+
+Analyze the following activity data and extract key work areas. The raw data (PRs, commits, Linear issues) is already displayed above - do NOT repeat it.
+
+Your task:
+1. Identify distinct work areas/themes from the activity
+2. Group related work together (e.g., forecasting, infrastructure, Dagster, etc.)
+3. Order work areas by activity level (most active first)
+4. For each area, describe what was accomplished in general terms
+5. DO NOT mention specific PR numbers, issue IDs, or repository names
+6. DO NOT list individual items - focus on patterns and themes
+7. Keep it concise and analytical
+
+CRITICAL: You must follow this EXACT output format:
+
+# Work Areas
+
+## 1. Work Area Name
+Description of what was accomplished in this area (2-3 sentences).
+
+## 2. Work Area Name
+Description of what was accomplished in this area (2-3 sentences).
+
+[Continue with list of sections...]
+
+Do NOT include any other lists, text, headers, or sections. Start immediately with "# Work Areas" and use the exact format shown above.
+
+Activity Data:
+{{ data_text }}

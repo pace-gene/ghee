@@ -1,0 +1,233 @@
+"""GitHub API interaction functions."""
+
+import json
+import sys
+from datetime import datetime
+from typing import Any
+
+from .utils import run_gh_command
+
+
+def get_user_login() -> str:
+    """Get the current user's GitHub login."""
+    output = run_gh_command(["api", "user", "--jq", ".login"])
+    return output
+
+
+def get_user_events(
+    username: str, from_date: datetime, to_date: datetime
+) -> list[dict[str, Any]]:
+    """Get user events from GitHub API."""
+    events = []
+
+    try:
+        # Get user events (limited to last 90 days by GitHub API)
+        output = run_gh_command(
+            [
+                "api",
+                f"users/{username}/events",
+                "--paginate",
+                "--jq",
+                ".[] | {type: .type, created_at: .created_at, repo: .repo.name, payload: .payload}",
+            ]
+        )
+
+        if output:
+            for line in output.split("\n"):
+                if line.strip():
+                    try:
+                        event = json.loads(line)
+                        event_date = datetime.fromisoformat(
+                            event["created_at"].replace("Z", "+00:00")
+                        )
+
+                        # Convert from_date and to_date to timezone-aware for comparison
+                        from_date_tz = from_date.replace(tzinfo=event_date.tzinfo)
+                        to_date_tz = to_date.replace(tzinfo=event_date.tzinfo)
+
+                        # Filter events within date range
+                        if from_date_tz <= event_date <= to_date_tz:
+                            events.append(event)
+                    except (json.JSONDecodeError, KeyError, ValueError):
+                        continue
+
+    except Exception as e:
+        print(f"Warning: Could not fetch events: {e}", file=sys.stderr)
+
+    return events
+
+
+def get_recent_repos(username: str) -> list[str]:
+    """Get list of user's recent repositories."""
+    repos = []
+
+    try:
+        output = run_gh_command(
+            [
+                "api",
+                "user/repos",
+                "--jq",
+                ".[].full_name",
+            ]
+        )
+
+        if output:
+            repos = [repo.strip() for repo in output.split("\n") if repo.strip()]
+
+    except Exception as e:
+        print(f"Warning: Could not fetch repositories: {e}", file=sys.stderr)
+
+    return repos
+
+
+def get_commits_for_repo(
+    repo: str, username: str, from_date: datetime, to_date: datetime
+) -> list[dict[str, Any]]:
+    """Get commits for a specific repository."""
+    commits = []
+
+    try:
+        since = from_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+        until = to_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        output = run_gh_command(
+            [
+                "api",
+                f"repos/{repo}/commits",
+                "-f",
+                f"author={username}",
+                "-f",
+                f"since={since}",
+                "-f",
+                f"until={until}",
+                "--jq",
+                ".[] | {sha: .sha, message: .commit.message, date: .commit.author.date, author: .commit.author.name}",
+            ],
+            quiet=True,  # 404s are expected for private/inaccessible repos
+        )
+
+        if output:
+            for line in output.split("\n"):
+                if line.strip():
+                    try:
+                        commit = json.loads(line)
+                        commit["repo"] = repo
+                        commits.append(commit)
+                    except json.JSONDecodeError:
+                        continue
+
+    except Exception:
+        # Silently skip repos we can't access
+        pass
+
+    return commits
+
+
+def get_pull_requests(
+    username: str, from_date: datetime, to_date: datetime
+) -> list[dict[str, Any]]:
+    """Get pull requests created by the user using search API."""
+    prs = []
+
+    try:
+        from_date_str = from_date.strftime("%Y-%m-%d")
+        to_date_str = to_date.strftime("%Y-%m-%d")
+
+        # Use search prs command which works better than search/issues
+        output = run_gh_command(
+            [
+                "search",
+                "prs",
+                "--author",
+                username,
+                "--created",
+                f"{from_date_str}..{to_date_str}",
+                "--json",
+                "number,title,state,createdAt,repository",
+                "--limit",
+                "100",
+            ]
+        )
+
+        if output:
+            try:
+                prs_data = json.loads(output)
+                for pr in prs_data:
+                    prs.append(
+                        {
+                            "number": pr.get("number"),
+                            "title": pr.get("title", "No title"),
+                            "state": pr.get("state"),
+                            "created_at": pr.get("createdAt"),
+                            "repo": pr.get("repository", {}).get(
+                                "nameWithOwner", "unknown"
+                            ),
+                            "url": None,  # Can be added if needed
+                        }
+                    )
+            except json.JSONDecodeError:
+                # Fallback to old method if search prs doesn't work
+                search_query = (
+                    f"author:{username} created:{from_date_str}..{to_date_str} is:pr"
+                )
+                output = run_gh_command(
+                    [
+                        "api",
+                        "search/issues",
+                        "-q",
+                        search_query,
+                        "--jq",
+                        '.items[] | {number: .number, title: .title, state: .state, created_at: .created_at, repo: .repository_url | split("/") | .[-2:] | join("/"), url: .html_url}',
+                    ]
+                )
+                if output:
+                    for line in output.split("\n"):
+                        if line.strip():
+                            try:
+                                prs.append(json.loads(line))
+                            except json.JSONDecodeError:
+                                continue
+
+    except Exception as e:
+        print(f"Warning: Could not fetch pull requests: {e}", file=sys.stderr)
+
+    return prs
+
+
+def analyze_events(events: list[dict], username: str) -> dict[str, list[dict]]:
+    """Analyze events and categorize them."""
+    categorized: dict[str, list[dict]] = {"commits": [], "pull_requests": []}
+
+    for event in events:
+        event_type = event.get("type")
+        repo = event.get("repo", "unknown")
+        created_at = event.get("created_at")
+
+        if event_type == "PushEvent":
+            payload = event.get("payload", {})
+            commits = payload.get("commits", [])
+            for commit in commits:
+                if commit.get("author", {}).get("name") == username:
+                    categorized["commits"].append(
+                        {
+                            "sha": commit.get("sha"),
+                            "message": commit.get("message"),
+                            "date": created_at,
+                            "repo": repo,
+                        }
+                    )
+
+        elif event_type == "PullRequestEvent":
+            payload = event.get("payload", {})
+            pr = payload.get("pull_request", {})
+            categorized["pull_requests"].append(
+                {
+                    "number": pr.get("number"),
+                    "title": pr.get("title"),
+                    "state": pr.get("state"),
+                    "created_at": created_at,
+                    "repo": repo,
+                }
+            )
+
+    return categorized
