@@ -71,10 +71,10 @@ Alternatively, you can run it as a Python module:
 
 ```bash
 # Basic usage
-uv run --env-file .env python -m github_activity
+uv run --env-file .env python -m github_tools
 
 # Specify date range
-uv run --env-file .env python -m github_activity --from 2024-01-01 --to 2024-01-15
+uv run --env-file .env python -m github_tools --from 2024-01-01 --to 2024-01-15
 ```
 
 ### Arguments
@@ -97,7 +97,7 @@ The script provides:
 The project is organized as a Python package:
 
 ```
-github_activity/
+github_tools/
 ├── __init__.py          # Package exports
 ├── __main__.py          # CLI entry point
 ├── ai.py                # AI/Gemini integration

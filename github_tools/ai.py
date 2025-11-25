@@ -15,9 +15,17 @@ except ImportError:
     genai = None
     load_dotenv = None
 
+from .config import get_api_key
+
 
 def load_gemini_key() -> str | None:
-    """Load GEMINI_KEY from .env file."""
+    """Load GEMINI_KEY from config file or .env file (fallback)."""
+    # First try config file
+    api_key = get_api_key("gemini")
+    if api_key:
+        return api_key
+
+    # Fallback to .env file for backward compatibility
     if load_dotenv is None:
         return None
 

@@ -12,10 +12,17 @@ try:
 except ImportError:
     load_dotenv = None
 
+from .config import get_api_key
+
 
 def get_linear_api_key() -> str | None:
-    """Get Linear API key from .env file or lnr config file."""
-    # First try .env file
+    """Get Linear API key from config file, .env file, or lnr config file (fallback)."""
+    # First try config file
+    api_key = get_api_key("linear")
+    if api_key:
+        return api_key
+
+    # Fallback to .env file for backward compatibility
     if load_dotenv is not None:
         current_dir = Path.cwd()
         env_file = current_dir / ".env"

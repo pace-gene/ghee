@@ -102,10 +102,19 @@ def _run_activity(
     if not no_ai_summary:
         gemini_key = load_gemini_key()
         if not gemini_key:
-            if genai is None or load_dotenv is None:
+            if genai is None:
                 click.echo(
-                    "\n💡 Tip: Install 'google-generativeai' and 'python-dotenv' "
-                    "and set GEMINI_KEY in .env for AI-powered summaries.",
+                    "\n💡 Tip: Install 'google-generativeai' "
+                    "and set the 'gemini' API key in the config file for AI-powered summaries.",
+                    err=True,
+                )
+            else:
+                from .config import get_config_path
+
+                config_path = get_config_path()
+                click.echo(
+                    f"\n💡 Tip: Set the 'gemini' API key in {config_path} "
+                    "for AI-powered summaries.",
                     err=True,
                 )
         else:
