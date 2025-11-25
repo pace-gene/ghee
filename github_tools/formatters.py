@@ -206,3 +206,105 @@ def format_data_for_gemini(
             lines.append(f"    Updated: {date}")
 
     return "\n".join(lines)
+
+
+def format_pr_comments(comments: list[dict], json_output: bool = False) -> str:
+    """Format PR comments for output.
+
+    Args:
+        comments: List of comment dictionaries
+        json_output: If True, return JSON; otherwise return human-readable format
+
+    Returns:
+        Formatted string output
+    """
+    import json as json_module
+
+    if json_output:
+        return json_module.dumps(comments, indent=2)
+
+    if not comments:
+        return "No unresolved PR comments found."
+
+    lines = [
+        f"📝 Unresolved PR Comments ({len(comments)} total)",
+        "=" * 60,
+        "",
+    ]
+
+    # Group comments by PR
+    comments_by_pr: dict[int, list[dict]] = {}
+    for comment in comments:
+        pr_number = comment.get("pr_number")
+        if pr_number:
+            if pr_number not in comments_by_pr:
+                comments_by_pr[pr_number] = []
+            comments_by_pr[pr_number].append(comment)
+
+    # Sort PRs by number
+    for pr_number in sorted(comments_by_pr.keys()):
+        pr_comments = comments_by_pr[pr_number]
+        first_comment = pr_comments[0]
+        pr_title = first_comment.get("pr_title", "No title")
+        pr_url = first_comment.get("pr_url", "")
+
+        lines.append(f"PR #{pr_number}: {pr_title}")
+        if pr_url:
+            lines.append(f"  URL: {pr_url}")
+        lines.append(f"  Comments: {len(pr_comments)}")
+        lines.append("")
+
+        for comment in pr_comments:
+            user = comment.get("user", "unknown")
+            body = comment.get("body", "").strip()
+            created_at = comment.get("created_at") or comment.get("submitted_at", "")
+
+            if created_at:
+                date = format_date(created_at)
+            else:
+                date = "Unknown date"
+
+            # Show file and line information in standard notation: <path>:<line> or <path>:<start>-<end>
+            path = comment.get("path", "")
+            line = comment.get("line")
+            start_line = comment.get("start_line")
+            original_line = comment.get("original_line")
+            original_start_line = comment.get("original_start_line")
+
+            if path:
+                # Check if this is a range (has start_line)
+                if start_line and line and start_line != line:
+                    # Range in the new file
+                    lines.append(f"  {path}:{start_line}-{line}")
+                elif (
+                    original_start_line
+                    and original_line
+                    and original_start_line != original_line
+                ):
+                    # Range in the original file (deleted lines)
+                    lines.append(f"  {path}:{original_start_line}-{original_line}")
+                elif line:
+                    # Single line in new file
+                    lines.append(f"  {path}:{line}")
+                elif original_line:
+                    # Single line in original file (deleted)
+                    lines.append(f"  {path}:{original_line}")
+                else:
+                    # File-level comment
+                    lines.append(f"  {path}")
+            else:
+                # General review comment without specific file/line
+                lines.append("  (general review comment)")
+
+            # Output full comment body
+            lines.append(f"  👤 {user} ({date})")
+            lines.append(f"  💬 {body}")
+
+            # Add URL if available
+            comment_url = comment.get("url", "")
+            if comment_url:
+                lines.append(f"  🔗 {comment_url}")
+
+            lines.append("")
+
+    return "\n".join(lines)

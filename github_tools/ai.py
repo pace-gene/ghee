@@ -10,36 +10,45 @@ from jinja2 import Environment, FileSystemLoader
 
 try:
     import google.generativeai as genai
-    from dotenv import load_dotenv
 except ImportError:
     genai = None
-    load_dotenv = None
 
 from .config import get_api_key
 
 
+def _strip_quotes_and_whitespace(value: str) -> str:
+    """Strip quotes (single or double) and whitespace from a string."""
+    if not value:
+        return value
+    value = value.strip()
+    # Strip matching quotes from both ends
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1].strip()
+    return value
+
+
 def load_gemini_key() -> str | None:
-    """Load GEMINI_KEY from config file or .env file (fallback)."""
-    # First try config file
+    """Load GEMINI_KEY from environment variables or config file.
+
+    Environment variables take precedence over config file.
+    """
+    # Check environment variables first (highest precedence)
+    env_key = os.getenv("GEMINI_KEY")
+    if env_key:
+        env_key = _strip_quotes_and_whitespace(env_key)
+        if env_key:
+            return env_key
+
+    # Fallback to config file
     api_key = get_api_key("gemini")
     if api_key:
-        return api_key
+        api_key = _strip_quotes_and_whitespace(api_key)
+        if api_key:
+            return api_key
 
-    # Fallback to .env file for backward compatibility
-    if load_dotenv is None:
-        return None
-
-    # Try to find .env file in current directory or parent directories
-    current_dir = Path.cwd()
-    env_file = current_dir / ".env"
-
-    if env_file.exists():
-        load_dotenv(env_file)
-    else:
-        # Try loading from current directory anyway
-        load_dotenv()
-
-    return os.getenv("GEMINI_KEY")
+    return None
 
 
 def get_user_identity() -> str:

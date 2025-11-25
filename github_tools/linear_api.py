@@ -7,31 +7,38 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
 from .config import get_api_key
 
 
+def _strip_quotes_and_whitespace(value: str) -> str:
+    """Strip quotes (single or double) and whitespace from a string."""
+    if not value:
+        return value
+    value = value.strip()
+    # Strip matching quotes from both ends
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1].strip()
+    return value
+
+
 def get_linear_api_key() -> str | None:
-    """Get Linear API key from config file, .env file, or lnr config file (fallback)."""
-    # First try config file
+    """Get Linear API key from environment variables, config file, or lnr config file.
+
+    Environment variables take precedence over config file.
+    """
+    # Check environment variables first (highest precedence)
+    env_key = os.getenv("LINEAR_KEY")
+    if env_key:
+        env_key = _strip_quotes_and_whitespace(env_key)
+        if env_key:
+            return env_key
+
+    # Fallback to config file
     api_key = get_api_key("linear")
     if api_key:
-        return api_key
-
-    # Fallback to .env file for backward compatibility
-    if load_dotenv is not None:
-        current_dir = Path.cwd()
-        env_file = current_dir / ".env"
-        if env_file.exists():
-            load_dotenv(env_file)
-        else:
-            load_dotenv()
-
-        api_key = os.getenv("LINEAR_KEY")
+        api_key = _strip_quotes_and_whitespace(api_key)
         if api_key:
             return api_key
 

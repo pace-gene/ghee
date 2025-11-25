@@ -6,24 +6,27 @@ from datetime import datetime
 import click
 
 from .ai import get_gemini_summary, load_gemini_key
-from .formatters import format_data_for_gemini, print_activity_summary
+from .formatters import (
+    format_data_for_gemini,
+    format_pr_comments,
+    print_activity_summary,
+)
 from .github_api import (
     analyze_events,
     get_commits_for_repo,
     get_pull_requests,
     get_recent_repos,
+    get_unresolved_pr_comments,
     get_user_events,
     get_user_login,
 )
 from .linear_api import get_linear_issues
-from .utils import get_monday_two_weeks_ago
+from .utils import get_git_repo_info, get_monday_two_weeks_ago
 
 try:
     import google.generativeai as genai
-    from dotenv import load_dotenv
 except ImportError:
     genai = None
-    load_dotenv = None
 
 
 def _run_activity(
@@ -194,6 +197,39 @@ def cli(
 def activity(from_date: str | None, to_date: str | None, no_ai_summary: bool) -> None:
     """Analyze GitHub activity between dates."""
     _run_activity(from_date, to_date, no_ai_summary)
+
+
+@cli.command()  # type: ignore[misc]
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output as JSON instead of human-readable format",
+)
+def pr(json_output: bool) -> None:
+    """Fetch and list all unresolved PR comments for the current repository."""
+    # Get git repo info
+    repo_info = get_git_repo_info()
+    if not repo_info:
+        click.echo(
+            "Error: Not in a git repository or could not determine repository information.",
+            err=True,
+        )
+        click.echo(
+            "Make sure you're in a directory that's part of a git clone with a remote 'origin'.",
+            err=True,
+        )
+        sys.exit(1)
+
+    owner, repo = repo_info
+    click.echo(f"🔍 Fetching PR comments for {owner}/{repo}...")
+
+    # Fetch comments
+    comments = get_unresolved_pr_comments(owner, repo)
+
+    # Format and output
+    output = format_pr_comments(comments, json_output=json_output)
+    click.echo(output)
 
 
 def main() -> None:

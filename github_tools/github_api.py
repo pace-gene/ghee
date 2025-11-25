@@ -231,3 +231,155 @@ def analyze_events(events: list[dict], username: str) -> dict[str, list[dict]]:
             )
 
     return categorized
+
+
+def get_unresolved_pr_comments(owner: str, repo: str) -> list[dict[str, Any]]:
+    """Get all unresolved review comments from open pull requests.
+
+    Args:
+        owner: Repository owner
+        repo: Repository name
+
+    Returns:
+        List of comment dictionaries with PR and comment information
+    """
+    comments: list[dict[str, Any]] = []
+
+    try:
+        # First, get all open PRs using gh pr list (more reliable than API)
+        output = run_gh_command(
+            [
+                "pr",
+                "list",
+                "--repo",
+                f"{owner}/{repo}",
+                "--state",
+                "open",
+                "--json",
+                "number,title,url,createdAt",
+            ]
+        )
+
+        if not output:
+            return comments
+
+        # Parse PRs
+        try:
+            prs_data = json.loads(output)
+            prs = []
+            for pr in prs_data:
+                prs.append(
+                    {
+                        "number": pr.get("number"),
+                        "title": pr.get("title", "No title"),
+                        "url": pr.get("url", ""),
+                        "created_at": pr.get("createdAt", ""),
+                    }
+                )
+        except json.JSONDecodeError:
+            return comments
+
+        # For each PR, get unresolved review comments
+        for pr in prs:
+            pr_number = pr.get("number")
+            if not pr_number:
+                continue
+
+            # Use GraphQL to get review threads with resolved status
+            # This is more reliable than REST API for determining unresolved status
+            graphql_query = f"""
+            {{
+              repository(owner: "{owner}", name: "{repo}") {{
+                pullRequest(number: {pr_number}) {{
+                  reviewThreads(first: 100) {{
+                    nodes {{
+                      isResolved
+                      comments(first: 100) {{
+                        nodes {{
+                          id
+                          body
+                          author {{
+                            login
+                          }}
+                          createdAt
+                          url
+                          path
+                          line
+                          startLine
+                          originalLine
+                          originalStartLine
+                          diffHunk
+                        }}
+                      }}
+                    }}
+                  }}
+                }}
+              }}
+            }}
+            """
+
+            threads_output = run_gh_command(
+                [
+                    "api",
+                    "graphql",
+                    "-f",
+                    f"query={graphql_query}",
+                ],
+                quiet=True,
+            )
+
+            if threads_output:
+                try:
+                    graphql_data = json.loads(threads_output)
+                    threads = (
+                        graphql_data.get("data", {})
+                        .get("repository", {})
+                        .get("pullRequest", {})
+                        .get("reviewThreads", {})
+                        .get("nodes", [])
+                    )
+
+                    for thread in threads:
+                        # Only include unresolved threads
+                        if not thread.get("isResolved", True):
+                            thread_comments = thread.get("comments", {}).get(
+                                "nodes", []
+                            )
+                            # GitHub counts unresolved threads, not individual comments
+                            # Include all comments in the thread for full context
+                            for comment in thread_comments:
+                                comment_data = {
+                                    "id": comment.get("id", "").split("_")[-1]
+                                    if comment.get("id")
+                                    else "",
+                                    "body": comment.get("body", ""),
+                                    "path": comment.get("path", ""),
+                                    "line": comment.get("line"),
+                                    "start_line": comment.get("startLine"),
+                                    "original_line": comment.get("originalLine"),
+                                    "original_start_line": comment.get(
+                                        "originalStartLine"
+                                    ),
+                                    "user": comment.get("author", {}).get(
+                                        "login", "unknown"
+                                    ),
+                                    "created_at": comment.get("createdAt", ""),
+                                    "url": comment.get("url", ""),
+                                    "diff_hunk": comment.get("diffHunk", ""),
+                                    "pr_number": pr_number,
+                                    "pr_title": pr.get("title", "No title"),
+                                    "pr_url": pr.get("url", ""),
+                                }
+                                comments.append(comment_data)
+                except (json.JSONDecodeError, KeyError):
+                    # Fallback to REST API if GraphQL fails
+                    pass
+
+            # Note: We're only including inline code review comments (from review threads)
+            # General review comments (from /reviews endpoint) are not included as they
+            # are typically not considered "unresolved" in the GitHub UI count
+
+    except Exception as e:
+        print(f"Warning: Could not fetch PR comments: {e}", file=sys.stderr)
+
+    return comments

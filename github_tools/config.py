@@ -1,7 +1,6 @@
 """Configuration management using INI files in standard config directories."""
 
 import configparser
-import os
 from pathlib import Path
 
 from platformdirs import user_config_dir
@@ -44,10 +43,10 @@ def load_config() -> configparser.ConfigParser:
         config.add_section("api_keys")
         config.set("api_keys", "gemini", "")
         config.set("api_keys", "linear", "")
-        
+
         config.add_section("settings")
         # Add any future settings here with defaults or empty strings
-        
+
         # Write the config file
         with open(config_file, "w") as f:
             config.write(f)
@@ -110,4 +109,3 @@ def get_setting(section: str, key: str, fallback: str | None = None) -> str | No
         return config.get(section, key, fallback=fallback)
     except (configparser.NoSectionError, configparser.NoOptionError):
         return fallback
-
