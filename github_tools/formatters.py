@@ -192,12 +192,55 @@ def format_activity_summary(
                 lines.append(f"- {date} - {message}")
             lines.append("")
 
-    # Convert PRs and Linear issues to WorkItems
+    # Convert PRs to WorkItems
     pr_items = [WorkItem.from_pr(pr) for pr in all_prs]
-    linear_items = [WorkItem.from_linear_issue(issue) for issue in linear_issues]
-
     lines.extend(_format_work_items(pr_items, "Pull Requests", "🔀"))
-    lines.extend(_format_work_items(linear_items, "Linear Issues", "📋"))
+
+    # Handle Linear issues with grouping if there are many
+    if linear_issues and len(linear_issues) > 100:
+        # Group by project/parent
+        grouped: dict[str, list[dict]] = {}
+        ungrouped: list[dict] = []
+
+        for issue in linear_issues:
+            project = issue.get("project")
+            parent_title = issue.get("parent_title")
+
+            # Prefer project grouping, fallback to parent
+            group_key = None
+            if project:
+                group_key = f"Project: {project}"
+            elif parent_title:
+                group_key = f"Parent: {parent_title}"
+
+            if group_key:
+                if group_key not in grouped:
+                    grouped[group_key] = []
+                grouped[group_key].append(issue)
+            else:
+                ungrouped.append(issue)
+
+        # Format grouped issues
+        lines.append(f"\n## 📋 Linear Issues ({len(linear_issues)} total)")
+        lines.append("")
+
+        # Output grouped issues - only show the project/parent, not individual tasks
+        for group_key in sorted(grouped.keys()):
+            group_issues = grouped[group_key]
+            lines.append(f"- {group_key} ({len(group_issues)} issues)")
+
+        # Output ungrouped issues (those without projects or parents)
+        if ungrouped:
+            ungrouped_items = [
+                WorkItem.from_linear_issue(issue) for issue in ungrouped
+            ]
+            for item in sorted(ungrouped_items, key=lambda x: x.sort_key, reverse=True):
+                lines.append(f"- {item.state_emoji} **{item.identifier}** - {item.title}")
+                lines.append(f"  - {item.date_label}: {item.date}")
+    else:
+        # Original format for smaller lists
+        linear_items = [WorkItem.from_linear_issue(issue) for issue in linear_issues]
+        lines.extend(_format_work_items(linear_items, "Linear Issues", "📋"))
 
     if not unique_commits and not all_prs and not linear_issues:
         lines.append("\n❌ No activity found in the specified date range.")
@@ -278,30 +321,82 @@ def format_data_for_gemini(
     if linear_issues:
         lines.append(f"\n\nLINEAR ISSUES ({len(linear_issues)} total):")
         lines.append("-" * 50)
-        for issue in sorted(
-            linear_issues,
-            key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""),
-            reverse=True,
-        ):
-            status = issue.get("status", "Unknown")
-            issue_id = issue.get("id", "?")
-            title = issue.get("title", "No title")
-            updated = issue.get("updated_at")
-            created = issue.get("created_at")
-            if updated:
-                date = format_date(updated)
-            elif created:
-                date = format_date(created)
-            else:
-                date = "Unknown date"
-            lines.append(f"  - {issue_id} [{status}]: {title}")
-            lines.append(f"    Updated: {date}")
-            parent_title = issue.get("parent_title")
-            if parent_title:
-                lines.append(f"    Parent: {parent_title}")
-            project = issue.get("project")
-            if project:
-                lines.append(f"    Project: {project}")
+
+        # Group by parent/project if there are many issues (more than 100)
+        if len(linear_issues) > 100:
+            # Group issues by project first, then by parent
+            grouped: dict[str, list[dict]] = {}
+            ungrouped: list[dict] = []
+
+            for issue in linear_issues:
+                project = issue.get("project")
+                parent_title = issue.get("parent_title")
+
+                # Prefer project grouping, fallback to parent
+                group_key = None
+                if project:
+                    group_key = f"Project: {project}"
+                elif parent_title:
+                    group_key = f"Parent: {parent_title}"
+
+                if group_key:
+                    if group_key not in grouped:
+                        grouped[group_key] = []
+                    grouped[group_key].append(issue)
+                else:
+                    ungrouped.append(issue)
+
+            # Output grouped issues - only show the project/parent, not individual tasks
+            for group_key in sorted(grouped.keys()):
+                group_issues = grouped[group_key]
+                lines.append(f"  - {group_key} ({len(group_issues)} issues)")
+
+            # Output ungrouped issues (those without projects or parents)
+            if ungrouped:
+                for issue in sorted(
+                    ungrouped,
+                    key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""),
+                    reverse=True,
+                ):
+                    status = issue.get("status", "Unknown")
+                    issue_id = issue.get("id", "?")
+                    title = issue.get("title", "No title")
+                    updated = issue.get("updated_at")
+                    created = issue.get("created_at")
+                    if updated:
+                        date = format_date(updated)
+                    elif created:
+                        date = format_date(created)
+                    else:
+                        date = "Unknown date"
+                    lines.append(f"  - {issue_id} [{status}]: {title}")
+                    lines.append(f"    Updated: {date}")
+        else:
+            # Original format for smaller lists
+            for issue in sorted(
+                linear_issues,
+                key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""),
+                reverse=True,
+            ):
+                status = issue.get("status", "Unknown")
+                issue_id = issue.get("id", "?")
+                title = issue.get("title", "No title")
+                updated = issue.get("updated_at")
+                created = issue.get("created_at")
+                if updated:
+                    date = format_date(updated)
+                elif created:
+                    date = format_date(created)
+                else:
+                    date = "Unknown date"
+                lines.append(f"  - {issue_id} [{status}]: {title}")
+                lines.append(f"    Updated: {date}")
+                parent_title = issue.get("parent_title")
+                if parent_title:
+                    lines.append(f"    Parent: {parent_title}")
+                project = issue.get("project")
+                if project:
+                    lines.append(f"    Project: {project}")
 
     return "\n".join(lines)
 
