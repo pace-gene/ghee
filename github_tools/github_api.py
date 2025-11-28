@@ -126,67 +126,165 @@ def get_commits_for_repo(
 def get_pull_requests(
     username: str, from_date: datetime, to_date: datetime
 ) -> list[dict[str, Any]]:
-    """Get pull requests created by the user using search API."""
+    """Get pull requests created by the user using search API with pagination."""
     prs = []
 
     try:
         from_date_str = from_date.strftime("%Y-%m-%d")
         to_date_str = to_date.strftime("%Y-%m-%d")
 
-        # Use search prs command which works better than search/issues
-        output = run_gh_command(
+        # Use GraphQL API for proper pagination support
+        # First, get the user ID
+        user_query = f"""
+        query {{
+            user(login: "{username}") {{
+                id
+            }}
+        }}
+        """
+
+        user_output = run_gh_command(
             [
-                "search",
-                "prs",
-                "--author",
-                username,
-                "--created",
-                f"{from_date_str}..{to_date_str}",
-                "--json",
-                "number,title,state,createdAt,repository",
-                "--limit",
-                "100",
-            ]
+                "api",
+                "graphql",
+                "-f",
+                f"query={user_query}",
+            ],
+            quiet=True,
         )
 
-        if output:
+        user_id = None
+        if user_output:
             try:
-                prs_data = json.loads(output)
-                for pr in prs_data:
-                    prs.append(
-                        {
-                            "number": pr.get("number"),
-                            "title": pr.get("title", "No title"),
-                            "state": pr.get("state"),
-                            "created_at": pr.get("createdAt"),
-                            "repo": pr.get("repository", {}).get(
-                                "nameWithOwner", "unknown"
-                            ),
-                            "url": None,  # Can be added if needed
-                        }
-                    )
+                user_data = json.loads(user_output)
+                user_id = user_data.get("data", {}).get("user", {}).get("id")
             except json.JSONDecodeError:
-                # Fallback to old method if search prs doesn't work
-                search_query = (
-                    f"author:{username} created:{from_date_str}..{to_date_str} is:pr"
-                )
+                pass
+
+        if user_id:
+            # Use GraphQL search with pagination
+            cursor = None
+            has_next_page = True
+
+            while has_next_page:
+                cursor_part = f', after: "{cursor}"' if cursor else ""
+                search_query = f"""
+                query {{
+                    search(
+                        type: ISSUE,
+                        query: "author:{username} created:{from_date_str}..{to_date_str} is:pr",
+                        first: 100{cursor_part}
+                    ) {{
+                        pageInfo {{
+                            hasNextPage
+                            endCursor
+                        }}
+                        nodes {{
+                            ... on PullRequest {{
+                                number
+                                title
+                                state
+                                createdAt
+                                repository {{
+                                    nameWithOwner
+                                }}
+                                url
+                            }}
+                        }}
+                    }}
+                }}
+                """
+
                 output = run_gh_command(
                     [
                         "api",
-                        "search/issues",
-                        "-q",
-                        search_query,
-                        "--jq",
-                        '.items[] | {number: .number, title: .title, state: .state, created_at: .created_at, repo: .repository_url | split("/") | .[-2:] | join("/"), url: .html_url}',
-                    ]
+                        "graphql",
+                        "-f",
+                        f"query={search_query}",
+                    ],
+                    quiet=True,
                 )
+
                 if output:
-                    for line in output.split("\n"):
-                        if line.strip():
-                            try:
-                                prs.append(json.loads(line))
-                            except json.JSONDecodeError:
-                                continue
+                    try:
+                        data = json.loads(output)
+                        search_data = data.get("data", {}).get("search", {})
+                        page_info = search_data.get("pageInfo", {})
+                        nodes = search_data.get("nodes", [])
+
+                        for pr in nodes:
+                            repo = pr.get("repository", {})
+                            prs.append(
+                                {
+                                    "number": pr.get("number"),
+                                    "title": pr.get("title", "No title"),
+                                    "state": pr.get("state"),
+                                    "created_at": pr.get("createdAt"),
+                                    "repo": repo.get("nameWithOwner", "unknown"),
+                                    "url": pr.get("url"),
+                                }
+                            )
+
+                        has_next_page = page_info.get("hasNextPage", False)
+                        cursor = page_info.get("endCursor")
+                    except json.JSONDecodeError:
+                        has_next_page = False
+                else:
+                    has_next_page = False
+
+        # Fallback to search prs command if GraphQL fails
+        if not prs:
+            output = run_gh_command(
+                [
+                    "search",
+                    "prs",
+                    "--author",
+                    username,
+                    "--created",
+                    f"{from_date_str}..{to_date_str}",
+                    "--json",
+                    "number,title,state,createdAt,repository",
+                    "--limit",
+                    "1000",  # Increase limit, but note: gh search prs has a max of 1000
+                ]
+            )
+
+            if output:
+                try:
+                    prs_data = json.loads(output)
+                    for pr in prs_data:
+                        prs.append(
+                            {
+                                "number": pr.get("number"),
+                                "title": pr.get("title", "No title"),
+                                "state": pr.get("state"),
+                                "created_at": pr.get("createdAt"),
+                                "repo": pr.get("repository", {}).get(
+                                    "nameWithOwner", "unknown"
+                                ),
+                                "url": None,
+                            }
+                        )
+                except json.JSONDecodeError:
+                    # Final fallback to old method
+                    search_query = f"author:{username} created:{from_date_str}..{to_date_str} is:pr"
+                    output = run_gh_command(
+                        [
+                            "api",
+                            "search/issues",
+                            "-q",
+                            search_query,
+                            "--jq",
+                            '.items[] | {number: .number, title: .title, state: .state, created_at: .created_at, repo: .repository_url | split("/") | .[-2:] | join("/"), url: .html_url}',
+                        ]
+                    )
+                    if output:
+                        for line in output.split("\n"):
+                            if line.strip():
+                                try:
+                                    prs.append(json.loads(line))
+                                except json.JSONDecodeError:
+                                    continue
 
     except Exception as e:
         print(f"Warning: Could not fetch pull requests: {e}", file=sys.stderr)

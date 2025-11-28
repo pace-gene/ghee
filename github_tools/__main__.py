@@ -8,9 +8,8 @@ import click
 
 from .ai import get_gemini_summary, load_gemini_key
 from .formatters import (
-    format_data_for_gemini,
+    format_activity_summary,
     format_pr_comments,
-    print_activity_summary,
 )
 from .github_api import (
     analyze_events,
@@ -34,6 +33,7 @@ def _run_activity(
     from_date: str | None,
     to_date: str | None,
     no_ai_summary: bool,
+    output_file: str | None = None,
     github_user: str | None = None,
     linear_user: str | None = None,
 ) -> None:
@@ -123,12 +123,13 @@ def _run_activity(
     else:
         click.echo("⚠️  Skipping Linear (--github-user specified without --linear-user)")
 
-    # Print summary
-    activity_data = print_activity_summary(
+    # Format summary as markdown
+    markdown = format_activity_summary(
         commits, prs, events_summary, linear_issues, parsed_from_date, parsed_to_date
     )
 
     # Generate AI summary by default if key is available (unless disabled)
+    ai_summary_markdown = ""
     if not no_ai_summary:
         gemini_key = load_gemini_key()
         if not gemini_key:
@@ -149,24 +150,31 @@ def _run_activity(
                 )
         else:
             click.echo("\n🤖 Generating AI summary with Gemini...")
-            data_text = format_data_for_gemini(
-                activity_data["commits"],
-                activity_data["prs"],
-                activity_data["linear_issues"],
-                parsed_from_date,
-                parsed_to_date,
-            )
             current_date = datetime.now().strftime("%Y-%m-%d")
             summary = get_gemini_summary(
-                data_text, gemini_key, current_date=current_date
+                markdown, gemini_key, current_date=current_date
             )
             if summary:
-                click.echo("\n" + "=" * 60)
-                click.echo("🤖 AI-Powered Summary")
-                click.echo("=" * 60)
-                click.echo(summary)
+                ai_summary_markdown = (
+                    "\n\n---\n\n" + "## 🤖 AI-Powered Summary\n\n" + summary
+                )
             else:
                 click.echo("⚠️  Failed to generate AI summary.", err=True)
+
+    # Combine markdown output
+    full_markdown = markdown + ai_summary_markdown
+
+    # Write to file or print to stdout
+    if output_file:
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(full_markdown)
+            click.echo(f"✅ Activity summary written to {output_file}")
+        except Exception as e:
+            click.echo(f"Error writing to file: {e}", err=True)
+            sys.exit(1)
+    else:
+        click.echo(full_markdown)
 
 
 @click.group(invoke_without_command=True)
@@ -199,6 +207,13 @@ def _run_activity(
     type=str,
     help="Linear user email or ID to analyze (default: authenticated user)",
 )
+@click.option(
+    "--output",
+    "-o",
+    "output_file",
+    type=click.Path(dir_okay=False, writable=True),
+    help="Write output to a markdown file instead of stdout",
+)
 @click.pass_context
 def cli(
     ctx: click.Context,
@@ -207,11 +222,14 @@ def cli(
     no_ai_summary: bool,
     github_user: str | None,
     linear_user: str | None,
+    output_file: str | None = None,
 ) -> None:
     """GitHub Activity Analyzer CLI."""
     # If no command was invoked, default to 'activity'
     if ctx.invoked_subcommand is None:
-        _run_activity(from_date, to_date, no_ai_summary, github_user, linear_user)
+        _run_activity(
+            from_date, to_date, no_ai_summary, output_file, github_user, linear_user
+        )
     else:
         # Store the params in context for subcommands to access if needed
         ctx.ensure_object(dict)
@@ -220,6 +238,7 @@ def cli(
         ctx.obj["no_ai_summary"] = no_ai_summary
         ctx.obj["github_user"] = github_user
         ctx.obj["linear_user"] = linear_user
+        ctx.obj["output_file"] = output_file
 
 
 @cli.command()  # type: ignore[misc]
@@ -252,15 +271,25 @@ def cli(
     type=str,
     help="Linear user email or ID to analyze (default: authenticated user)",
 )
+@click.option(
+    "--output",
+    "-o",
+    "output_file",
+    type=click.Path(dir_okay=False, writable=True),
+    help="Write output to a markdown file instead of stdout",
+)
 def activity(
     from_date: str | None,
     to_date: str | None,
     no_ai_summary: bool,
     github_user: str | None,
     linear_user: str | None,
+    output_file: str | None = None,
 ) -> None:
     """Analyze GitHub activity between dates."""
-    _run_activity(from_date, to_date, no_ai_summary, github_user, linear_user)
+    _run_activity(
+        from_date, to_date, no_ai_summary, output_file, github_user, linear_user
+    )
 
 
 @cli.command()  # type: ignore[misc]

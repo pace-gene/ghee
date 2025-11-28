@@ -234,73 +234,91 @@ def get_linear_issues(
         from_date_iso = from_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         to_date_iso = to_date.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        issues_query = f"""
-        query {{
-            issues(
-                filter: {{
-                    assignee: {{ id: {{ eq: "{user_id}" }} }}
-                    updatedAt: {{ gte: "{from_date_iso}", lte: "{to_date_iso}" }}
-                }}
-                first: 100
-                orderBy: updatedAt
-            ) {{
-                nodes {{
-                    identifier
-                    title
-                    state {{
-                        name
+        # Use cursor-based pagination to fetch all issues
+        cursor = None
+        has_next_page = True
+
+        while has_next_page:
+            cursor_part = f', after: "{cursor}"' if cursor else ""
+            issues_query = f"""
+            query {{
+                issues(
+                    filter: {{
+                        assignee: {{ id: {{ eq: "{user_id}" }} }}
+                        updatedAt: {{ gte: "{from_date_iso}", lte: "{to_date_iso}" }}
                     }}
-                    updatedAt
-                    createdAt
+                    first: 100{cursor_part}
+                    orderBy: updatedAt
+                ) {{
+                    pageInfo {{
+                        hasNextPage
+                        endCursor
+                    }}
+                    nodes {{
+                        identifier
+                        title
+                        state {{
+                            name
+                        }}
+                        updatedAt
+                        createdAt
+                    }}
                 }}
             }}
-        }}
-        """
+            """
 
-        response = requests.post(
-            "https://api.linear.app/graphql",
-            json={"query": issues_query},
-            headers=headers,
-            timeout=10,
-        )
+            response = requests.post(
+                "https://api.linear.app/graphql",
+                json={"query": issues_query},
+                headers=headers,
+                timeout=10,
+            )
 
-        if response.status_code == 200:
-            data = response.json()
-            nodes = data.get("data", {}).get("issues", {}).get("nodes", [])
-            for node in nodes:
-                updated_at = node.get("updatedAt")
-                created_at = node.get("createdAt")
+            if response.status_code == 200:
+                data = response.json()
+                issues_data = data.get("data", {}).get("issues", {})
+                page_info = issues_data.get("pageInfo", {})
+                nodes = issues_data.get("nodes", [])
 
-                # Only include issues that were actually updated (worked on) in the timeframe
-                # Exclude issues where updatedAt == createdAt (only created, not worked on)
-                if updated_at and updated_at != created_at:
-                    try:
-                        updated_date = datetime.fromisoformat(
-                            updated_at.replace("Z", "+00:00")
-                        )
+                for node in nodes:
+                    updated_at = node.get("updatedAt")
+                    created_at = node.get("createdAt")
 
-                        # Verify updated date is in range
-                        from_date_tz = from_date.replace(tzinfo=updated_date.tzinfo)
-                        to_date_tz = to_date.replace(tzinfo=updated_date.tzinfo)
-
-                        if from_date_tz <= updated_date <= to_date_tz:
-                            # Only include if it was actually updated (not just created) in the timeframe
-                            # This means updatedAt should be different from createdAt
-                            issues.append(
-                                {
-                                    "id": node.get("identifier", "Unknown"),
-                                    "title": node.get("title", "Unknown"),
-                                    "status": node.get("state", {}).get(
-                                        "name", "Unknown"
-                                    ),
-                                    "updated_at": updated_at,
-                                    "created_at": created_at,
-                                    "source": "linear",
-                                }
+                    # Only include issues that were actually updated (worked on) in the timeframe
+                    # Exclude issues where updatedAt == createdAt (only created, not worked on)
+                    if updated_at and updated_at != created_at:
+                        try:
+                            updated_date = datetime.fromisoformat(
+                                updated_at.replace("Z", "+00:00")
                             )
-                    except (ValueError, AttributeError):
-                        # If date parsing fails, skip this issue
-                        pass
+
+                            # Verify updated date is in range
+                            from_date_tz = from_date.replace(tzinfo=updated_date.tzinfo)
+                            to_date_tz = to_date.replace(tzinfo=updated_date.tzinfo)
+
+                            if from_date_tz <= updated_date <= to_date_tz:
+                                # Only include if it was actually updated (not just created) in the timeframe
+                                # This means updatedAt should be different from createdAt
+                                issues.append(
+                                    {
+                                        "id": node.get("identifier", "Unknown"),
+                                        "title": node.get("title", "Unknown"),
+                                        "status": node.get("state", {}).get(
+                                            "name", "Unknown"
+                                        ),
+                                        "updated_at": updated_at,
+                                        "created_at": created_at,
+                                        "source": "linear",
+                                    }
+                                )
+                        except (ValueError, AttributeError):
+                            # If date parsing fails, skip this issue
+                            pass
+
+                has_next_page = page_info.get("hasNextPage", False)
+                cursor = page_info.get("endCursor")
+            else:
+                has_next_page = False
 
     except ImportError:
         # requests not available, fallback to lnr

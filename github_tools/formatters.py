@@ -95,32 +95,40 @@ class WorkItem:
 
 def _format_work_items(
     items: list[WorkItem], section_title: str, section_emoji: str
-) -> None:
-    """Format and print a list of work items."""
+) -> list[str]:
+    """Format a list of work items as markdown lines."""
     if not items:
-        return
+        return []
 
-    print(f"\n{section_emoji} {section_title} ({len(items)} total)")
-    print("-" * 30)
+    lines = [
+        f"\n## {section_emoji} {section_title} ({len(items)} total)",
+        "",
+    ]
     for item in sorted(items, key=lambda x: x.sort_key, reverse=True):
-        print(item.format_line())
-        print(item.format_date_line())
+        # Format as markdown list item
+        lines.append(f"- {item.state_emoji} **{item.identifier}** - {item.title}")
+        lines.append(f"  - {item.date_label}: {item.date}")
+
+    return lines
 
 
-def print_activity_summary(
+def format_activity_summary(
     commits: list[dict],
     prs: list[dict],
     events_summary: dict,
     linear_issues: list[dict],
     from_date: datetime,
     to_date: datetime,
-) -> dict[str, Any]:
-    """Print a formatted summary of GitHub activity and return the data."""
-    print("\n🔍 GitHub Activity Summary")
-    print(
-        f"📅 Period: {from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}"
-    )
-    print("=" * 60)
+) -> str:
+    """Format GitHub activity summary as markdown."""
+    lines = [
+        "# 🔍 GitHub Activity Summary",
+        "",
+        f"**Period:** {from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}",
+        "",
+        "---",
+        "",
+    ]
 
     # Combine commits from API calls and events
     all_commits = commits + events_summary.get("commits", [])
@@ -157,38 +165,40 @@ def print_activity_summary(
         commits_by_repo[repo].append(commit)
 
     if commits_by_repo:
-        print(f"\n📝 Commits ({len(unique_commits)} total)")
-        print("-" * 30)
+        lines.append(f"## 📝 Commits ({len(unique_commits)} total)")
+        lines.append("")
         for repo, repo_commits in sorted(commits_by_repo.items()):
-            print(f"\n📦 {repo} ({len(repo_commits)} commits)")
+            lines.append(f"### 📦 {repo} ({len(repo_commits)} commits)")
+            lines.append("")
             for commit in sorted(
                 repo_commits, key=lambda x: x.get("date", ""), reverse=True
             ):
                 date = format_date(commit.get("date", ""))
-                message = commit.get("message", "").split("\n")[0][:60]
-                print(f"  • {date} - {message}")
+                message = commit.get("message", "").split("\n")[0]
+                lines.append(f"- {date} - {message}")
+            lines.append("")
 
     # Convert PRs and Linear issues to WorkItems
     pr_items = [WorkItem.from_pr(pr) for pr in all_prs]
     linear_items = [WorkItem.from_linear_issue(issue) for issue in linear_issues]
 
-    _format_work_items(pr_items, "Pull Requests", "🔀")
-    _format_work_items(linear_items, "Linear Issues", "📋")
+    lines.extend(_format_work_items(pr_items, "Pull Requests", "🔀"))
+    lines.extend(_format_work_items(linear_items, "Linear Issues", "📋"))
 
     if not unique_commits and not all_prs and not linear_issues:
-        print("\n❌ No activity found in the specified date range.")
-        print("Note: GitHub events API only shows the last 90 days of activity.")
+        lines.append("\n❌ No activity found in the specified date range.")
+        lines.append(
+            "\n> Note: GitHub events API only shows the last 90 days of activity."
+        )
 
-    print(
-        f"\n📊 Summary: {len(unique_commits)} commits, {len(all_prs)} PRs, {len(linear_issues)} Linear issues"
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+    lines.append(
+        f"**Summary:** {len(unique_commits)} commits, {len(all_prs)} PRs, {len(linear_issues)} Linear issues"
     )
 
-    return {
-        "commits": unique_commits,
-        "prs": all_prs,
-        "linear_issues": linear_issues,
-        "commits_by_repo": commits_by_repo,
-    }
+    return "\n".join(lines)
 
 
 def format_data_for_gemini(
