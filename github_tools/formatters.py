@@ -1,9 +1,110 @@
 """Formatting functions for GitHub Activity Analyzer."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from .utils import format_date
+
+
+@dataclass
+class WorkItem:
+    """Unified representation of a GitHub PR or Linear issue."""
+
+    identifier: str  # repo#number for PRs, issue_id for Linear
+    title: str
+    state_emoji: str  # ✅, 🟡, or ❌
+    date: str  # Formatted date string
+    date_label: str  # "Created" or "Updated"
+    sort_key: str  # For sorting (ISO date string)
+
+    @staticmethod
+    def _get_state_emoji_from_github_state(state: str) -> str:
+        """Convert GitHub PR state to emoji."""
+        state_lower = (state or "unknown").lower()
+        if state_lower == "closed" or state_lower == "merged":
+            return "✅"
+        elif state_lower == "open":
+            return "🟡"
+        else:
+            return "❌"
+
+    @staticmethod
+    def _get_state_emoji_from_linear_status(status: str) -> str:
+        """Convert Linear issue status to emoji."""
+        status_lower = (status or "Unknown").lower()
+        if "done" in status_lower or "completed" in status_lower:
+            return "✅"
+        elif "review" in status_lower or "progress" in status_lower:
+            return "🟡"
+        elif "cancel" in status_lower:
+            return "❌"
+        else:
+            return "🟡"  # Default to in-progress for unknown states
+
+    @classmethod
+    def from_pr(cls, pr: dict[str, Any]) -> "WorkItem":
+        """Create a WorkItem from a GitHub PR dict."""
+        state = pr.get("state") or "unknown"
+        repo = pr.get("repo", "unknown")
+        number = pr.get("number", "?")
+        title = pr.get("title") or "No title"
+        created_at = pr.get("created_at", "")
+        date_str = format_date(created_at) if created_at else "Unknown date"
+
+        return cls(
+            identifier=f"{repo}#{number}",
+            title=title,
+            state_emoji=cls._get_state_emoji_from_github_state(state),
+            date=date_str,
+            date_label="Created",
+            sort_key=created_at or "",
+        )
+
+    @classmethod
+    def from_linear_issue(cls, issue: dict[str, Any]) -> "WorkItem":
+        """Create a WorkItem from a Linear issue dict."""
+        status = issue.get("status", "Unknown")
+        issue_id = issue.get("id", "?")
+        title = issue.get("title") or "No title"
+        updated_at = issue.get("updated_at")
+        created_at = issue.get("created_at")
+
+        # Prefer updated_at, fallback to created_at
+        date_iso = updated_at or created_at or ""
+        date_str = format_date(date_iso) if date_iso else "Unknown date"
+        date_label = "Updated" if updated_at else "Created"
+
+        return cls(
+            identifier=issue_id,
+            title=title,
+            state_emoji=cls._get_state_emoji_from_linear_status(status),
+            date=date_str,
+            date_label=date_label,
+            sort_key=date_iso,
+        )
+
+    def format_line(self) -> str:
+        """Format this work item as a single line."""
+        return f"  {self.state_emoji} {self.identifier} - {self.title}"
+
+    def format_date_line(self) -> str:
+        """Format the date line for this work item."""
+        return f"     {self.date_label}: {self.date}"
+
+
+def _format_work_items(
+    items: list[WorkItem], section_title: str, section_emoji: str
+) -> None:
+    """Format and print a list of work items."""
+    if not items:
+        return
+
+    print(f"\n{section_emoji} {section_title} ({len(items)} total)")
+    print("-" * 30)
+    for item in sorted(items, key=lambda x: x.sort_key, reverse=True):
+        print(item.format_line())
+        print(item.format_date_line())
 
 
 def print_activity_summary(
@@ -67,45 +168,12 @@ def print_activity_summary(
                 message = commit.get("message", "").split("\n")[0][:60]
                 print(f"  • {date} - {message}")
 
-    if all_prs:
-        print(f"\n🔀 Pull Requests ({len(all_prs)} total)")
-        print("-" * 30)
-        for pr in sorted(
-            all_prs, key=lambda x: x.get("created_at") or "", reverse=True
-        ):
-            state = pr.get("state") or "unknown"
-            state_emoji = (
-                "✅"
-                if state == "closed" or state == "merged"
-                else "🟡"
-                if state == "open"
-                else "❌"
-            )
-            date = format_date(pr.get("created_at", ""))
-            repo = pr.get("repo", "unknown")
-            number = pr.get("number", "?")
-            title = pr.get("title") or "No title"
-            print(f"  {state_emoji} {repo}#{number} - {title}")
-            print(f"     Created: {date}")
+    # Convert PRs and Linear issues to WorkItems
+    pr_items = [WorkItem.from_pr(pr) for pr in all_prs]
+    linear_items = [WorkItem.from_linear_issue(issue) for issue in linear_issues]
 
-    if linear_issues:
-        print(f"\n📋 Linear Issues ({len(linear_issues)} total)")
-        print("-" * 30)
-        for issue in sorted(
-            linear_issues,
-            key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""),
-            reverse=True,
-        ):
-            status = issue.get("status", "Unknown")
-            issue_id = issue.get("id", "?")
-            title = issue.get("title", "No title")
-            updated = issue.get("updated_at")
-            if updated:
-                date = format_date(updated)
-            else:
-                date = "Unknown date"
-            print(f"  • {issue_id} - {title}")
-            print(f"    Status: {status} | Updated: {date}")
+    _format_work_items(pr_items, "Pull Requests", "🔀")
+    _format_work_items(linear_items, "Linear Issues", "📋")
 
     if not unique_commits and not all_prs and not linear_issues:
         print("\n❌ No activity found in the specified date range.")
