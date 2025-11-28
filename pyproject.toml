@@ -7,13 +7,14 @@ name = "ghee"
 version = "0.2.0"
 description = "Buttery tools for GitHub"
 readme = "README.md"
-license = {text = "Proprietary"}
+license = {text = "BSD-2-Clause"}
 authors = [
     {name = "Gene"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -68,3 +69,8 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+
+[dependency-groups]
+dev = [
+    "markdown-code-runner>=2.4.0",
+]

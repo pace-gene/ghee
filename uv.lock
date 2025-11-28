@@ -175,6 +175,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "markdown-code-runner" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0.0" },
@@ -188,6 +193,9 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "markdown-code-runner", specifier = ">=2.4.0" }]
 
 [[package]]
 name = "google-ai-generativelanguage"
@@ -445,6 +453,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67", size = 134899, upload-time = "2025-03-05T20:05:00.369Z" },
+]
+
+[[package]]
+name = "markdown-code-runner"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/91/6b7030f873b0c49f38131c7a5ac9432238cf1e1cd47104c05b07cf5c32ed/markdown_code_runner-2.4.0.tar.gz", hash = "sha256:7d6229c437f0c71e5c0442585663af4bfe4beacddf884a64ea8c09fd5dbc31dd", size = 19072, upload-time = "2025-08-23T19:07:41.78Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/3c/8857763070aa0f39591b012f92ab40bd5fe906914085e925eb117e28f306/markdown_code_runner-2.4.0-py3-none-any.whl", hash = "sha256:5be62e75ab35188b37f2d440c19b6683df68615ea24bed4955d95a745e56b483", size = 12292, upload-time = "2025-08-23T19:07:40.972Z" },
 ]
 
 [[package]]

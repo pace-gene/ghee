@@ -1,6 +1,6 @@
-# GitHub Activity Analyzer
+# ghee
 
-A Python package that analyzes your GitHub activity between specified dates and shows what you've worked on, with optional AI-powered summaries.
+Buttery tools for GitHub - A Python package that analyzes your GitHub activity between specified dates and shows what you've worked on, with optional AI-powered summaries.
 
 ## Features
 
@@ -21,7 +21,7 @@ A Python package that analyzes your GitHub activity between specified dates and 
 
 1. Clone this repository
 2. Install dependencies:
-   ```bash
+   ```bash markdown-code-runner
    uv sync
    ```
 
@@ -36,45 +36,48 @@ gh auth login
 
 ### Optional: Linear Integration
 
-To include Linear issues in your activity summary, set your Linear API key in a `.env` file:
-```bash
-LINEAR_KEY=your_linear_api_key
-```
+To include Linear issues in your activity summary, set your Linear API key either:
+- As an environment variable: `LINEAR_KEY=your_linear_api_key`
+- In the config file at `~/.config/ghee/config.ini` under `[api_keys]` section: `linear = your_linear_api_key`
 
 ### Optional: AI Summaries
 
-To enable AI-powered summaries, set your Google Gemini API key in a `.env` file:
-```bash
-GEMINI_KEY=your_gemini_api_key
-```
+To enable AI-powered summaries, set your Google Gemini API key either:
+- As an environment variable: `GEMINI_KEY=your_gemini_api_key`
+- In the config file at `~/.config/ghee/config.ini` under `[api_keys]` section: `gemini = your_gemini_api_key`
+
+Note: Environment variables take precedence over the config file.
 
 ## Usage
 
-### Using the installed script
+### Activity Command
 
-After installation, you can run the tool using the `gh-activity` command:
+Analyze your GitHub activity:
 
-```bash
+```bash markdown-code-runner
 # Basic usage (last 2 weeks from Monday)
-uv run --env-file .env gh-activity
+uv run ghee activity
 
 # Specify date range
-uv run --env-file .env gh-activity --from 2024-01-01 --to 2024-01-15
+uv run ghee activity --from 2024-01-01 --to 2024-01-15
 
 # Disable AI summary
-uv run --env-file .env gh-activity --no-ai-summary
+uv run ghee activity --no-ai-summary
+
+# You can also use it as the default command
+uv run ghee --from 2024-01-01
 ```
 
-### Using Python module
+### PR Comments Command
 
-Alternatively, you can run it as a Python module:
+List unresolved PR comments for the current repository:
 
-```bash
-# Basic usage
-uv run --env-file .env python -m github_tools
+```bash markdown-code-runner
+# Human-readable format
+uv run ghee pr
 
-# Specify date range
-uv run --env-file .env python -m github_tools --from 2024-01-01 --to 2024-01-15
+# JSON output
+uv run ghee pr --json
 ```
 
 ### Arguments
@@ -101,6 +104,7 @@ github_tools/
 ├── __init__.py          # Package exports
 ├── __main__.py          # CLI entry point
 ├── ai.py                # AI/Gemini integration
+├── config.py            # Configuration management
 ├── formatters.py        # Output formatting
 ├── github_api.py        # GitHub API interactions
 ├── linear_api.py        # Linear API interactions
@@ -111,15 +115,15 @@ github_tools/
 ## Development
 
 ### Running tests
-```bash
+```bash markdown-code-runner
 uv run pytest tests
 ```
 
 ### Linting
-```bash
+```bash markdown-code-runner
 uv run pre-commit run -a
 ```
 
 ## License
 
-MIT
+BSD-2-Clause License
