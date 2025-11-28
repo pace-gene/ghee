@@ -64,6 +64,15 @@ uv run ghee activity --from 2024-01-01 --to 2024-01-15
 # Disable AI summary
 uv run ghee activity --no-ai-summary
 
+# Analyze a different user's activity
+uv run ghee activity --github-user username --linear-user user@example.com
+
+# Analyze only GitHub activity for a specific user (Linear disabled)
+uv run ghee activity --github-user username
+
+# Analyze only Linear activity for a specific user (GitHub disabled)
+uv run ghee activity --linear-user user@example.com
+
 # You can also use it as the default command
 uv run ghee --from 2024-01-01
 ```
@@ -85,6 +94,8 @@ uv run ghee pr --json
 - `--from DATE`: Start date in YYYY-MM-DD format (default: Monday 2 weeks ago)
 - `--to DATE`: End date in YYYY-MM-DD format (default: now)
 - `--no-ai-summary`: Disable AI-powered summary (enabled by default if GEMINI_KEY is set)
+- `--github-user USERNAME`: GitHub username to analyze (default: authenticated user). If specified without `--linear-user`, Linear will be disabled to avoid mixing users.
+- `--linear-user EMAIL_OR_ID`: Linear user email or ID to analyze (default: authenticated user). If specified without `--github-user`, GitHub will be disabled to avoid mixing users.
 
 ## Output
 

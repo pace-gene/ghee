@@ -2,6 +2,7 @@
 
 import sys
 from datetime import datetime
+from typing import Any
 
 import click
 
@@ -30,7 +31,11 @@ except ImportError:
 
 
 def _run_activity(
-    from_date: str | None, to_date: str | None, no_ai_summary: bool
+    from_date: str | None,
+    to_date: str | None,
+    no_ai_summary: bool,
+    github_user: str | None = None,
+    linear_user: str | None = None,
 ) -> None:
     """Analyze GitHub activity between dates."""
     # Parse dates
@@ -57,44 +62,66 @@ def _run_activity(
         click.echo("Error: --from date must be before --to date", err=True)
         sys.exit(1)
 
-    # Get username
-    try:
-        username = get_user_login()
-        if not username:
-            raise Exception("Could not get username")
-        click.echo(f"🔍 Analyzing GitHub activity for user: {username}")
-    except Exception:
-        click.echo(
-            "Error: Could not get GitHub user info. "
-            "Make sure you're logged in with 'gh auth login'",
-            err=True,
-        )
-        sys.exit(1)
+    # Determine which services to use based on user options
+    # If only one user option is provided, disable the other service to avoid mixing users
+    use_github = not linear_user or github_user is not None
+    use_linear = not github_user or linear_user is not None
 
-    # Fetch activity data using multiple approaches
-    click.echo("📡 Fetching activity data...")
-
-    # Get events (most reliable for recent activity)
-    events = get_user_events(username, parsed_from_date, parsed_to_date)
-    events_summary = analyze_events(events, username)
-
-    # Also try to get data directly from search APIs
+    # Get GitHub username and fetch data if enabled
+    username = None
     commits = []
-    repos = get_recent_repos(username)
+    prs = []
+    events_summary: dict[str, list[Any]] = {"commits": [], "pull_requests": []}
 
-    # Get commits from recent repos (limit to avoid rate limiting)
-    # Use quiet mode since 404s are expected for private/inaccessible repos
-    for repo in repos[:10]:
-        repo_commits = get_commits_for_repo(
-            repo, username, parsed_from_date, parsed_to_date
+    if use_github:
+        if github_user:
+            username = github_user
+            click.echo(f"🔍 Analyzing GitHub activity for user: {username}")
+        else:
+            try:
+                username = get_user_login()
+                if not username:
+                    raise Exception("Could not get username")
+                click.echo(f"🔍 Analyzing GitHub activity for user: {username}")
+            except Exception:
+                click.echo(
+                    "Error: Could not get GitHub user info. "
+                    "Make sure you're logged in with 'gh auth login' or use --github-user",
+                    err=True,
+                )
+                sys.exit(1)
+
+        # Fetch activity data using multiple approaches
+        click.echo("📡 Fetching GitHub activity data...")
+
+        # Get events (most reliable for recent activity)
+        events = get_user_events(username, parsed_from_date, parsed_to_date)
+        events_summary = analyze_events(events, username)
+
+        # Also try to get data directly from search APIs
+        repos = get_recent_repos(username)
+
+        # Get commits from recent repos (limit to avoid rate limiting)
+        # Use quiet mode since 404s are expected for private/inaccessible repos
+        for repo in repos[:10]:
+            repo_commits = get_commits_for_repo(
+                repo, username, parsed_from_date, parsed_to_date
+            )
+            commits.extend(repo_commits)
+
+        prs = get_pull_requests(username, parsed_from_date, parsed_to_date)
+    else:
+        click.echo("⚠️  Skipping GitHub (--linear-user specified without --github-user)")
+
+    # Get Linear issues if enabled
+    linear_issues = []
+    if use_linear:
+        click.echo("📋 Fetching Linear issues...")
+        linear_issues = get_linear_issues(
+            parsed_from_date, parsed_to_date, user_identifier=linear_user
         )
-        commits.extend(repo_commits)
-
-    prs = get_pull_requests(username, parsed_from_date, parsed_to_date)
-
-    # Get Linear issues
-    click.echo("📋 Fetching Linear issues...")
-    linear_issues = get_linear_issues(parsed_from_date, parsed_to_date)
+    else:
+        click.echo("⚠️  Skipping Linear (--github-user specified without --linear-user)")
 
     # Print summary
     activity_data = print_activity_summary(
@@ -160,20 +187,39 @@ def _run_activity(
     is_flag=True,
     help="Disable AI-powered summary (by default, uses Gemini if GEMINI_KEY is available)",
 )
+@click.option(
+    "--github-user",
+    "github_user",
+    type=str,
+    help="GitHub username to analyze (default: authenticated user)",
+)
+@click.option(
+    "--linear-user",
+    "linear_user",
+    type=str,
+    help="Linear user email or ID to analyze (default: authenticated user)",
+)
 @click.pass_context
 def cli(
-    ctx: click.Context, from_date: str | None, to_date: str | None, no_ai_summary: bool
+    ctx: click.Context,
+    from_date: str | None,
+    to_date: str | None,
+    no_ai_summary: bool,
+    github_user: str | None,
+    linear_user: str | None,
 ) -> None:
     """GitHub Activity Analyzer CLI."""
     # If no command was invoked, default to 'activity'
     if ctx.invoked_subcommand is None:
-        _run_activity(from_date, to_date, no_ai_summary)
+        _run_activity(from_date, to_date, no_ai_summary, github_user, linear_user)
     else:
         # Store the params in context for subcommands to access if needed
         ctx.ensure_object(dict)
         ctx.obj["from_date"] = from_date
         ctx.obj["to_date"] = to_date
         ctx.obj["no_ai_summary"] = no_ai_summary
+        ctx.obj["github_user"] = github_user
+        ctx.obj["linear_user"] = linear_user
 
 
 @cli.command()  # type: ignore[misc]
@@ -194,9 +240,27 @@ def cli(
     is_flag=True,
     help="Disable AI-powered summary (by default, uses Gemini if GEMINI_KEY is available)",
 )
-def activity(from_date: str | None, to_date: str | None, no_ai_summary: bool) -> None:
+@click.option(
+    "--github-user",
+    "github_user",
+    type=str,
+    help="GitHub username to analyze (default: authenticated user)",
+)
+@click.option(
+    "--linear-user",
+    "linear_user",
+    type=str,
+    help="Linear user email or ID to analyze (default: authenticated user)",
+)
+def activity(
+    from_date: str | None,
+    to_date: str | None,
+    no_ai_summary: bool,
+    github_user: str | None,
+    linear_user: str | None,
+) -> None:
     """Analyze GitHub activity between dates."""
-    _run_activity(from_date, to_date, no_ai_summary)
+    _run_activity(from_date, to_date, no_ai_summary, github_user, linear_user)
 
 
 @cli.command()  # type: ignore[misc]

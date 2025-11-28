@@ -60,8 +60,16 @@ def get_linear_api_key() -> str | None:
     return None
 
 
-def get_linear_issues(from_date: datetime, to_date: datetime) -> list[dict[str, Any]]:
-    """Get Linear issues worked on in the date range using GraphQL API."""
+def get_linear_issues(
+    from_date: datetime, to_date: datetime, user_identifier: str | None = None
+) -> list[dict[str, Any]]:
+    """Get Linear issues worked on in the date range using GraphQL API.
+
+    Args:
+        from_date: Start date for the query
+        to_date: End date for the query
+        user_identifier: Optional user email or ID. If not provided, uses authenticated user.
+    """
     issues = []
 
     try:
@@ -101,15 +109,6 @@ def get_linear_issues(from_date: datetime, to_date: datetime) -> list[dict[str, 
         # Query Linear GraphQL API directly
         import requests
 
-        # Get user ID first
-        user_query = """
-        query {
-            viewer {
-                id
-            }
-        }
-        """
-
         # Linear API uses the API key directly as Authorization header
         # Format can be either just the key or "Bearer <key>"
         if api_key.startswith("Bearer "):
@@ -126,18 +125,107 @@ def get_linear_issues(from_date: datetime, to_date: datetime) -> list[dict[str, 
             "Content-Type": "application/json",
         }
 
-        response = requests.post(
-            "https://api.linear.app/graphql",
-            json={"query": user_query},
-            headers=headers,
-            timeout=10,
-        )
+        # Get user ID - either from provided identifier or authenticated user
+        user_id = None
+        if user_identifier:
+            # Check if it's already a user ID (UUID format), email, or name
+            import re
 
-        if response.status_code != 200:
-            return issues
+            # Check if it looks like a UUID (8-4-4-4-12 hex digits)
+            uuid_pattern = re.compile(
+                r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                re.IGNORECASE,
+            )
 
-        user_data = response.json()
-        user_id = user_data.get("data", {}).get("viewer", {}).get("id")
+            if uuid_pattern.match(user_identifier):
+                # It's a UUID, use it directly as user ID
+                user_id = user_identifier
+            elif "@" in user_identifier:
+                # It's an email, search by email
+                user_search_query = f"""
+                query {{
+                    users(filter: {{ email: {{ eq: "{user_identifier}" }} }}) {{
+                        nodes {{
+                            id
+                        }}
+                    }}
+                }}
+                """
+                response = requests.post(
+                    "https://api.linear.app/graphql",
+                    json={"query": user_search_query},
+                    headers=headers,
+                    timeout=10,
+                )
+                if response.status_code == 200:
+                    user_data = response.json()
+                    users = user_data.get("data", {}).get("users", {}).get("nodes", [])
+                    if users:
+                        user_id = users[0].get("id")
+            else:
+                # Try searching by name (displayName or name field)
+                # Linear supports searching by name with contains or eq
+                user_search_query = f"""
+                query {{
+                    users(filter: {{
+                        or: [
+                            {{ name: {{ containsIgnoreCase: "{user_identifier}" }} }}
+                            {{ displayName: {{ containsIgnoreCase: "{user_identifier}" }} }}
+                        ]
+                    }}) {{
+                        nodes {{
+                            id
+                            name
+                            displayName
+                        }}
+                    }}
+                }}
+                """
+                response = requests.post(
+                    "https://api.linear.app/graphql",
+                    json={"query": user_search_query},
+                    headers=headers,
+                    timeout=10,
+                )
+                if response.status_code == 200:
+                    user_data = response.json()
+                    users = user_data.get("data", {}).get("users", {}).get("nodes", [])
+                    if users:
+                        # Try to find exact match first (by name or displayName)
+                        exact_match = None
+                        for user in users:
+                            if (
+                                user.get("name", "").lower() == user_identifier.lower()
+                                or user.get("displayName", "").lower()
+                                == user_identifier.lower()
+                            ):
+                                exact_match = user
+                                break
+                        if exact_match:
+                            user_id = exact_match.get("id")
+                        else:
+                            # Use first match if no exact match
+                            user_id = users[0].get("id")
+        else:
+            # Get authenticated user ID
+            user_query = """
+            query {
+                viewer {
+                    id
+                }
+            }
+            """
+            response = requests.post(
+                "https://api.linear.app/graphql",
+                json={"query": user_query},
+                headers=headers,
+                timeout=10,
+            )
+
+            if response.status_code == 200:
+                user_data = response.json()
+                user_id = user_data.get("data", {}).get("viewer", {}).get("id")
+
         if not user_id:
             return issues
 
