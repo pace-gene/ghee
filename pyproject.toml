@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ghee"
-version = "0.4.0"
+version = "0.5.0"
 description = "Buttery tools for GitHub"
 readme = "README.md"
 license = {text = "BSD-2-Clause"}

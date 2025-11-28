@@ -262,6 +262,13 @@ def get_linear_issues(
                         }}
                         updatedAt
                         createdAt
+                        parent {{
+                            identifier
+                            title
+                        }}
+                        project {{
+                            name
+                        }}
                     }}
                 }}
             }}
@@ -299,6 +306,20 @@ def get_linear_issues(
                             if from_date_tz <= updated_date <= to_date_tz:
                                 # Only include if it was actually updated (not just created) in the timeframe
                                 # This means updatedAt should be different from createdAt
+                                # Extract parent information
+                                parent = node.get("parent")
+                                parent_id = None
+                                parent_title = None
+                                if parent:
+                                    parent_id = parent.get("identifier")
+                                    parent_title = parent.get("title")
+
+                                # Extract project information
+                                project = node.get("project")
+                                project_name = None
+                                if project:
+                                    project_name = project.get("name")
+
                                 issues.append(
                                     {
                                         "id": node.get("identifier", "Unknown"),
@@ -308,6 +329,9 @@ def get_linear_issues(
                                         ),
                                         "updated_at": updated_at,
                                         "created_at": created_at,
+                                        "parent_id": parent_id,
+                                        "parent_title": parent_title,
+                                        "project": project_name,
                                         "source": "linear",
                                     }
                                 )

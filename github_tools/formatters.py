@@ -17,6 +17,8 @@ class WorkItem:
     date: str  # Formatted date string
     date_label: str  # "Created" or "Updated"
     sort_key: str  # For sorting (ISO date string)
+    parent_title: str | None = None  # Parent issue title (Linear only)
+    project: str | None = None  # Project name (Linear only)
 
     @staticmethod
     def _get_state_emoji_from_github_state(state: str) -> str:
@@ -75,6 +77,10 @@ class WorkItem:
         date_str = format_date(date_iso) if date_iso else "Unknown date"
         date_label = "Updated" if updated_at else "Created"
 
+        # Extract parent and project information
+        parent_title = issue.get("parent_title")
+        project = issue.get("project")
+
         return cls(
             identifier=issue_id,
             title=title,
@@ -82,6 +88,8 @@ class WorkItem:
             date=date_str,
             date_label=date_label,
             sort_key=date_iso,
+            parent_title=parent_title,
+            project=project,
         )
 
     def format_line(self) -> str:
@@ -108,6 +116,12 @@ def _format_work_items(
         # Format as markdown list item
         lines.append(f"- {item.state_emoji} **{item.identifier}** - {item.title}")
         lines.append(f"  - {item.date_label}: {item.date}")
+        # Add parent information if available
+        if item.parent_title:
+            lines.append(f"  - Parent: {item.parent_title}")
+        # Add project information if available
+        if item.project:
+            lines.append(f"  - Project: {item.project}")
 
     return lines
 
@@ -282,6 +296,12 @@ def format_data_for_gemini(
                 date = "Unknown date"
             lines.append(f"  - {issue_id} [{status}]: {title}")
             lines.append(f"    Updated: {date}")
+            parent_title = issue.get("parent_title")
+            if parent_title:
+                lines.append(f"    Parent: {parent_title}")
+            project = issue.get("project")
+            if project:
+                lines.append(f"    Project: {project}")
 
     return "\n".join(lines)
 
