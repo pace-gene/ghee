@@ -282,6 +282,33 @@ uv run ghee pr-rounds 123 --json \
 
 ---
 
+## 🤖 Agent skill (Claude Code / Cursor)
+
+`ghee` ships with an **agent skill** that teaches AI coding agents when and
+how to use the CLI (e.g. "what did I work on this week?", "what review
+comments are still open?"). It lives at [`skills/ghee/SKILL.md`](skills/ghee/SKILL.md).
+
+Install it by copying the skill folder into your agent's skills directory:
+
+```bash
+# Claude Code — make it available in every project (user-level)
+mkdir -p ~/.claude/skills
+cp -r skills/ghee ~/.claude/skills/ghee
+
+# …or scope it to a single project (project-level)
+mkdir -p .claude/skills
+cp -r skills/ghee .claude/skills/ghee
+
+# Cursor uses the same SKILL.md format under .cursor/skills
+mkdir -p ~/.cursor/skills
+cp -r skills/ghee ~/.cursor/skills/ghee
+```
+
+Once installed, the agent will reach for `ghee` automatically when you ask
+about GitHub activity, PR comments, or review rounds.
+
+---
+
 ## 📊 What you get
 
 - Commits grouped by repository
