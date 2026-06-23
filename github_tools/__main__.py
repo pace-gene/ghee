@@ -9,11 +9,13 @@ from .ai import get_gemini_summary, load_gemini_key
 from .formatters import (
     format_data_for_gemini,
     format_pr_comments,
+    format_pr_review_rounds,
     print_activity_summary,
 )
 from .github_api import (
     analyze_events,
     get_commits_for_repo,
+    get_pr_review_rounds,
     get_pull_requests,
     get_recent_repos,
     get_unresolved_pr_comments,
@@ -21,7 +23,7 @@ from .github_api import (
     get_user_login,
 )
 from .linear_api import get_linear_issues
-from .utils import get_git_repo_info, get_monday_two_weeks_ago
+from .utils import get_git_repo_info, get_monday_two_weeks_ago, parse_pr_ref
 
 try:
     import google.generativeai as genai
@@ -30,7 +32,10 @@ except ImportError:
 
 
 def _run_activity(
-    from_date: str | None, to_date: str | None, no_ai_summary: bool
+    from_date: str | None,
+    to_date: str | None,
+    no_ai_summary: bool,
+    github_user: str | None,
 ) -> None:
     """Analyze GitHub activity between dates."""
     # Parse dates
@@ -57,12 +62,11 @@ def _run_activity(
         click.echo("Error: --from date must be before --to date", err=True)
         sys.exit(1)
 
-    # Get username
+    # Resolve target user (authenticated login required for gh API access)
     try:
-        username = get_user_login()
-        if not username:
-            raise Exception("Could not get username")
-        click.echo(f"🔍 Analyzing GitHub activity for user: {username}")
+        viewer_login = get_user_login()
+        if not viewer_login:
+            raise Exception("Could not get authenticated user")
     except Exception:
         click.echo(
             "Error: Could not get GitHub user info. "
@@ -70,6 +74,14 @@ def _run_activity(
             err=True,
         )
         sys.exit(1)
+
+    # Default --user to the authenticated GitHub login when omitted or blank.
+    if github_user and github_user.strip():
+        username = github_user.strip()
+    else:
+        username = viewer_login
+
+    click.echo(f"🔍 Analyzing GitHub activity for user: {username}")
 
     # Fetch activity data using multiple approaches
     click.echo("📡 Fetching activity data...")
@@ -80,7 +92,7 @@ def _run_activity(
 
     # Also try to get data directly from search APIs
     commits = []
-    repos = get_recent_repos(username)
+    repos = get_recent_repos(username, viewer_login)
 
     # Get commits from recent repos (limit to avoid rate limiting)
     # Use quiet mode since 404s are expected for private/inaccessible repos
@@ -160,20 +172,34 @@ def _run_activity(
     is_flag=True,
     help="Disable AI-powered summary (by default, uses Gemini if GEMINI_KEY is available)",
 )
+@click.option(
+    "--user",
+    "-u",
+    "github_user",
+    type=str,
+    default=None,
+    show_default="logged-in user",
+    help="GitHub login to analyze",
+)
 @click.pass_context
 def cli(
-    ctx: click.Context, from_date: str | None, to_date: str | None, no_ai_summary: bool
+    ctx: click.Context,
+    from_date: str | None,
+    to_date: str | None,
+    no_ai_summary: bool,
+    github_user: str | None,
 ) -> None:
     """GitHub Activity Analyzer CLI."""
     # If no command was invoked, default to 'activity'
     if ctx.invoked_subcommand is None:
-        _run_activity(from_date, to_date, no_ai_summary)
+        _run_activity(from_date, to_date, no_ai_summary, github_user)
     else:
         # Store the params in context for subcommands to access if needed
         ctx.ensure_object(dict)
         ctx.obj["from_date"] = from_date
         ctx.obj["to_date"] = to_date
         ctx.obj["no_ai_summary"] = no_ai_summary
+        ctx.obj["github_user"] = github_user
 
 
 @cli.command()  # type: ignore[misc]
@@ -194,9 +220,23 @@ def cli(
     is_flag=True,
     help="Disable AI-powered summary (by default, uses Gemini if GEMINI_KEY is available)",
 )
-def activity(from_date: str | None, to_date: str | None, no_ai_summary: bool) -> None:
+@click.option(
+    "--user",
+    "-u",
+    "github_user",
+    type=str,
+    default=None,
+    show_default="logged-in user",
+    help="GitHub login to analyze",
+)
+def activity(
+    from_date: str | None,
+    to_date: str | None,
+    no_ai_summary: bool,
+    github_user: str | None,
+) -> None:
     """Analyze GitHub activity between dates."""
-    _run_activity(from_date, to_date, no_ai_summary)
+    _run_activity(from_date, to_date, no_ai_summary, github_user)
 
 
 @cli.command()  # type: ignore[misc]
@@ -229,6 +269,40 @@ def pr(json_output: bool) -> None:
 
     # Format and output
     output = format_pr_comments(comments, json_output=json_output)
+    click.echo(output)
+
+
+@cli.command("pr-rounds")  # type: ignore[misc]
+@click.argument("pr_ref")
+@click.option(
+    "--repo",
+    "repo_override",
+    default=None,
+    help=(
+        "Repository in OWNER/REPO format (overrides current git repo when "
+        "PR_REF is a bare number)."
+    ),
+)
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Output as JSON instead of human-readable format",
+)
+def pr_rounds(pr_ref: str, repo_override: str | None, json_output: bool) -> None:
+    """Fetch review rounds (submitted reviews + their inline comments) for a PR.
+
+    PR_REF can be a PR number (e.g. 123) or a full PR URL.
+    """
+    try:
+        owner, repo, pr_number = parse_pr_ref(pr_ref, repo_override=repo_override)
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    click.echo(f"🔍 Fetching review rounds for {owner}/{repo}#{pr_number}...")
+    rounds = get_pr_review_rounds(owner, repo, pr_number)
+    output = format_pr_review_rounds(rounds, json_output=json_output)
     click.echo(output)
 
 

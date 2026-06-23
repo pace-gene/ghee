@@ -1,129 +1,333 @@
-# ghee
+# 🧈 ghee
 
-Buttery tools for GitHub - A Python package that analyzes your GitHub activity between specified dates and shows what you've worked on, with optional AI-powered summaries.
+> **Buttery-smooth tools for GitHub.** See what you've shipped, never miss a review comment, and let AI write your standup for you.
 
-## Features
+<p>
+  <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white">
+  <img alt="License" src="https://img.shields.io/badge/license-BSD--2--Clause-green">
+  <img alt="Powered by gh" src="https://img.shields.io/badge/powered%20by-gh%20CLI-black?logo=github">
+  <img alt="uv" src="https://img.shields.io/badge/built%20with-uv-de5fe9">
+  <img alt="AI" src="https://img.shields.io/badge/AI-Google%20Gemini-8E75B2?logo=googlegemini&logoColor=white">
+</p>
 
-- 📝 Shows commits made in the date range
-- 🔀 Lists pull requests created
-- 📋 Integrates with Linear issues (optional)
-- 🤖 AI-powered summary using Google Gemini (optional)
-- 📊 Groups activity by repository
-- 🗓️ Flexible date range selection
+`ghee` is a tiny, friendly CLI that turns your scattered GitHub (and Linear) activity into a clean, readable summary. Point it at a date range and it tells you what you worked on. Point it at a PR and it tells you what reviewers said. Optionally, let Google Gemini turn it all into a tidy narrative.
 
-## Prerequisites
+```text
+🔍 Analyzing GitHub activity for user: octocat
+📡 Fetching activity data...
+📋 Fetching Linear issues...
 
-- Python 3.9 or higher
-- GitHub CLI (`gh`) installed and authenticated
-- UV package manager (recommended)
+============================================================
+🤖 AI-Powered Summary
+============================================================
+This sprint you focused on the auth refactor (3 PRs merged),
+fixed two flaky tests, and unblocked the billing migration…
+```
 
-## Installation
+---
 
-1. Clone this repository
-2. Install dependencies:
-   ```bash markdown-code-runner
-   uv sync
-   ```
+## 🤔 Why ghee?
 
-## Authentication
+- **"What did I do again?"** — Generate a standup, weekly update, or self-review in seconds instead of scrolling through GitHub.
+- **Never drop a review comment** — `ghee pr` surfaces every *unresolved* comment in the repo you're standing in.
+- **Understand a review at a glance** — `ghee pr-rounds` reconstructs a PR's review history into clean, chronological rounds.
+- **Zero hardcoding** — user, repo, and auth all come from your `gh` login and local git remote. Nothing company- or environment-specific baked in.
+- **Scriptable** — `--json` everywhere it matters, so you can pipe into `jq` and build your own dashboards.
 
-### GitHub
+---
 
-Make sure you're authenticated with GitHub CLI:
+## ✨ Features
+
+- 📝 **Commits** — everything you pushed in a date range, grouped by repo
+- 🔀 **Pull requests** — what you opened, with status at a glance
+- 💬 **PR comments** — list every *unresolved* review comment in the current repo
+- 🔁 **Review rounds** — reconstruct a PR's review history, round by round
+- 📋 **Linear issues** — fold in the tickets you actually worked on (optional)
+- 🤖 **AI summaries** — a human-readable recap via Google Gemini (optional)
+- 🧰 **Plays nice with scripts** — `--json` on the comment commands for `jq` pipelines
+
+---
+
+## 📦 Installation
+
+You'll need:
+
+- **Python 3.11+**
+- **[GitHub CLI](https://cli.github.com/)** (`gh`), installed and authenticated
+- **[uv](https://github.com/astral-sh/uv)** (recommended)
+
+Clone and sync:
+
+```bash
+uv sync
+```
+
+That's it — `ghee` is now runnable via `uv run ghee`.
+
+---
+
+## 🔑 Authentication & configuration
+
+### GitHub (required)
+
+`ghee` talks to GitHub through the `gh` CLI, so just log in once:
+
 ```bash
 gh auth login
 ```
 
-### Optional: Linear Integration
+The default user, current repo, and all API access are inferred from `gh` and your local git remote — nothing is hardcoded.
 
-To include Linear issues in your activity summary, set your Linear API key either:
-- As an environment variable: `LINEAR_KEY=your_linear_api_key`
-- In the config file at `~/.config/ghee/config.ini` under `[api_keys]` section: `linear = your_linear_api_key`
+### Linear (optional)
 
-### Optional: AI Summaries
+Want your Linear tickets in the mix? Provide an API key in any of these (highest precedence first):
 
-To enable AI-powered summaries, set your Google Gemini API key either:
-- As an environment variable: `GEMINI_KEY=your_gemini_api_key`
-- In the config file at `~/.config/ghee/config.ini` under `[api_keys]` section: `gemini = your_gemini_api_key`
+1. `LINEAR_KEY` environment variable
+2. `~/.config/ghee/config.ini` → `[api_keys]` → `linear = lin_api_…`
+3. An existing `~/.config/lnr.cfg` (first organization's key is reused automatically)
 
-Note: Environment variables take precedence over the config file.
+### AI summaries (optional)
 
-## Usage
+Drop in a Google Gemini key to unlock AI recaps:
 
-### Activity Command
+1. `GEMINI_KEY` environment variable
+2. `~/.config/ghee/config.ini` → `[api_keys]` → `gemini = …`
 
-Analyze your GitHub activity:
+> 💡 Environment variables always win over the config file. The config file is created for you on first run at `~/.config/ghee/config.ini` (location follows your OS config dir).
 
-```bash markdown-code-runner
-# Basic usage (last 2 weeks from Monday)
-uv run ghee activity
+---
 
-# Specify date range
-uv run ghee activity --from 2024-01-01 --to 2024-01-15
+## 🚀 Usage
 
-# Disable AI summary
-uv run ghee activity --no-ai-summary
+`ghee` has three commands. `activity` is the default — running `ghee` with no command is the same as `ghee activity`.
 
-# You can also use it as the default command
-uv run ghee --from 2024-01-01
+<!-- CODE:BASH:START -->
+<!-- uv run --no-sync ghee --help 2>/dev/null -->
+<!-- CODE:END -->
+
+```text
+<!-- OUTPUT:START -->
+<!-- ⚠️ This content is auto-generated by `markdown-code-runner`. -->
+Usage: ghee [OPTIONS] COMMAND [ARGS]...
+
+  GitHub Activity Analyzer CLI.
+
+Options:
+  --from TEXT      Start date (YYYY-MM-DD format, default: Monday 2 weeks ago)
+  --to TEXT        End date (YYYY-MM-DD format, default: now)
+  --no-ai-summary  Disable AI-powered summary (by default, uses Gemini if
+                   GEMINI_KEY is available)
+  -u, --user TEXT  GitHub login to analyze  [default: (logged-in user)]
+  --help           Show this message and exit.
+
+Commands:
+  activity   Analyze GitHub activity between dates.
+  pr         Fetch and list all unresolved PR comments for the current...
+  pr-rounds  Fetch review rounds (submitted reviews + their inline...
+
+<!-- OUTPUT:END -->
 ```
 
-### PR Comments Command
+### 1. `activity` — what did I work on?
 
-List unresolved PR comments for the current repository:
+Summarize your commits, PRs, and Linear issues across a date range.
 
-```bash markdown-code-runner
-# Human-readable format
+```bash
+# Default: from Monday two weeks ago → now
+uv run ghee activity
+
+# …and because activity is the default command:
+uv run ghee
+
+# Pick a date range (YYYY-MM-DD)
+uv run ghee activity --from 2024-01-01 --to 2024-01-15
+
+# Analyze someone else's public activity
+uv run ghee activity --user octocat
+
+# Skip the AI summary even if a Gemini key is set
+uv run ghee activity --no-ai-summary
+```
+
+<details>
+<summary><b>CLI reference</b></summary>
+
+<!-- CODE:BASH:START -->
+<!-- uv run --no-sync ghee activity --help 2>/dev/null -->
+<!-- CODE:END -->
+
+```text
+<!-- OUTPUT:START -->
+<!-- ⚠️ This content is auto-generated by `markdown-code-runner`. -->
+Usage: ghee activity [OPTIONS]
+
+  Analyze GitHub activity between dates.
+
+Options:
+  --from TEXT      Start date (YYYY-MM-DD format, default: Monday 2 weeks ago)
+  --to TEXT        End date (YYYY-MM-DD format, default: now)
+  --no-ai-summary  Disable AI-powered summary (by default, uses Gemini if
+                   GEMINI_KEY is available)
+  -u, --user TEXT  GitHub login to analyze  [default: (logged-in user)]
+  --help           Show this message and exit.
+
+<!-- OUTPUT:END -->
+```
+
+</details>
+
+### 2. `pr` — what review comments are still open?
+
+List every **unresolved** review comment on PRs in the current repository (detected from your git `origin`).
+
+```bash
+# Human-readable
 uv run ghee pr
 
-# JSON output
+# Machine-readable for scripts
 uv run ghee pr --json
 ```
 
-### Arguments
+> Run this from inside a cloned repo with an `origin` remote.
 
-- `--from DATE`: Start date in YYYY-MM-DD format (default: Monday 2 weeks ago)
-- `--to DATE`: End date in YYYY-MM-DD format (default: now)
-- `--no-ai-summary`: Disable AI-powered summary (enabled by default if GEMINI_KEY is set)
+<details>
+<summary><b>CLI reference</b></summary>
 
-## Output
+<!-- CODE:BASH:START -->
+<!-- uv run --no-sync ghee pr --help 2>/dev/null -->
+<!-- CODE:END -->
 
-The script provides:
-- Summary of commits grouped by repository
+```text
+<!-- OUTPUT:START -->
+<!-- ⚠️ This content is auto-generated by `markdown-code-runner`. -->
+Usage: ghee pr [OPTIONS]
+
+  Fetch and list all unresolved PR comments for the current repository.
+
+Options:
+  --json  Output as JSON instead of human-readable format
+  --help  Show this message and exit.
+
+<!-- OUTPUT:END -->
+```
+
+</details>
+
+### 3. `pr-rounds` — how did the review go?
+
+Reconstruct a PR's **review history as rounds**. Each round captures the review state (`APPROVED` / `CHANGES_REQUESTED` / `COMMENTED` / `DISMISSED`), the reviewer, their top-level body, and the inline comments left in that round.
+
+```bash
+# By full PR URL — works from anywhere
+uv run ghee pr-rounds https://github.com/owner/repo/pull/123
+
+# By number, using the current git repo
+uv run ghee pr-rounds 123
+
+# By number, with an explicit repo
+uv run ghee pr-rounds 123 --repo owner/repo
+
+# JSON output
+uv run ghee pr-rounds 123 --json
+```
+
+<details>
+<summary><b>CLI reference</b></summary>
+
+<!-- CODE:BASH:START -->
+<!-- uv run --no-sync ghee pr-rounds --help 2>/dev/null -->
+<!-- CODE:END -->
+
+```text
+<!-- OUTPUT:START -->
+<!-- ⚠️ This content is auto-generated by `markdown-code-runner`. -->
+Usage: ghee pr-rounds [OPTIONS] PR_REF
+
+  Fetch review rounds (submitted reviews + their inline comments) for a PR.
+
+  PR_REF can be a PR number (e.g. 123) or a full PR URL.
+
+Options:
+  --repo TEXT  Repository in OWNER/REPO format (overrides current git repo
+               when PR_REF is a bare number).
+  --json       Output as JSON instead of human-readable format
+  --help       Show this message and exit.
+
+<!-- OUTPUT:END -->
+```
+
+</details>
+
+Notes:
+
+- Pending (unsubmitted) reviews are excluded.
+- Pagination is capped at **100 reviews/PR** and **100 inline comments/review**; exceeding either prints a warning to `stderr`.
+- In human output, resolved comments are prefixed with ✅.
+
+**Per-comment JSON fields** (in addition to identity/location):
+
+| Field | Meaning |
+|-------|---------|
+| `thread_id` | GraphQL node ID of the parent review thread (e.g. `PRRT_kwDO…`), stable for the comment's lifetime |
+| `is_resolved` | Whether the parent thread is currently resolved |
+| `in_reply_to_id` | Short ID of the comment this replies to, or `null` for thread roots |
+| `commit_id` / `original_commit_id` | SHA the comment currently / originally points at; either may be `null` after a force-push |
+
+Filter out resolved comments with `jq`:
+
+```bash
+uv run ghee pr-rounds 123 --json \
+  | jq '[.[] | .comments |= map(select(.is_resolved | not))]'
+```
+
+---
+
+## 📊 What you get
+
+- Commits grouped by repository
 - Pull requests with their status
-- Linear issues (if configured)
-- AI-powered work area analysis (if configured)
-- Total counts of each activity type
+- Linear issues you actually worked on (if configured)
+- An AI-powered analysis of your focus areas (if configured)
+- Totals for each activity type
 
-## Project Structure
+---
 
-The project is organized as a Python package:
+## 🗂️ Project structure
 
-```
+```text
 github_tools/
-├── __init__.py          # Package exports
-├── __main__.py          # CLI entry point
-├── ai.py                # AI/Gemini integration
-├── config.py            # Configuration management
-├── formatters.py        # Output formatting
-├── github_api.py        # GitHub API interactions
-├── linear_api.py        # Linear API interactions
-├── prompt.j2            # Jinja2 template for LLM prompt
-└── utils.py             # Utility functions
+├── __init__.py      # Package exports
+├── __main__.py      # CLI entry point (Click commands)
+├── ai.py            # AI / Gemini integration
+├── config.py        # Config file management (~/.config/ghee/config.ini)
+├── formatters.py    # Output formatting (human + JSON)
+├── github_api.py    # GitHub interactions (via gh)
+├── linear_api.py    # Linear GraphQL interactions
+├── prompt.j2        # Jinja2 template for the LLM prompt
+└── utils.py         # Dates, git repo / PR-ref parsing
 ```
 
-## Development
+---
 
-### Running tests
-```bash markdown-code-runner
+## 🛠️ Development
+
+Run the tests:
+
+```bash
 uv run pytest tests
 ```
 
-### Linting
-```bash markdown-code-runner
+Lint & format (ruff + mypy via pre-commit):
+
+```bash
 uv run pre-commit run -a
 ```
 
-## License
+> The CLI help blocks above are kept in sync with `markdown-code-runner`:
+> `uv run --no-sync markdown-code-runner README.md`
 
-BSD-2-Clause License
+---
+
+## 📄 License
+
+BSD-2-Clause. See [`LICENSE`](LICENSE).

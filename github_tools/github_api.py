@@ -57,15 +57,25 @@ def get_user_events(
     return events
 
 
-def get_recent_repos(username: str) -> list[str]:
-    """Get list of user's recent repositories."""
+def get_recent_repos(username: str, viewer_login: str) -> list[str]:
+    """Get list of a user's recent repositories.
+
+    Uses ``user/repos`` when ``username`` is the authenticated user (includes
+    private repos they can access). Otherwise uses ``users/{username}/repos``
+    (public repositories for that account).
+    """
     repos = []
 
     try:
+        if username.casefold() == viewer_login.casefold():
+            path = "user/repos"
+        else:
+            path = f"users/{username}/repos"
+
         output = run_gh_command(
             [
                 "api",
-                "user/repos",
+                path,
                 "--jq",
                 ".[].full_name",
             ]
@@ -383,3 +393,229 @@ def get_unresolved_pr_comments(owner: str, repo: str) -> list[dict[str, Any]]:
         print(f"Warning: Could not fetch PR comments: {e}", file=sys.stderr)
 
     return comments
+
+
+def get_pr_review_rounds(owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
+    """Get submitted PR reviews ("rounds") with their inline comments.
+
+    Returns:
+        A list of round dicts, sorted ascending by ``submitted_at``. Pending
+        (unsubmitted) reviews are excluded. Each round contains the review
+        metadata (id, state, author, body, submission time, URL) plus the
+        inline review comments left as part of that review.
+    """
+    graphql_query = f"""
+    {{
+      repository(owner: "{owner}", name: "{repo}") {{
+        pullRequest(number: {pr_number}) {{
+          number
+          title
+          url
+          reviews(first: 100) {{
+            totalCount
+            nodes {{
+              id
+              databaseId
+              state
+              submittedAt
+              body
+              url
+              author {{
+                login
+              }}
+              comments(first: 100) {{
+                totalCount
+                nodes {{
+                  id
+                  databaseId
+                  body
+                  author {{
+                    login
+                  }}
+                  createdAt
+                  url
+                  path
+                  line
+                  startLine
+                  originalLine
+                  originalStartLine
+                  diffHunk
+                  replyTo {{
+                    id
+                  }}
+                  commit {{
+                    oid
+                  }}
+                  originalCommit {{
+                    oid
+                  }}
+                }}
+              }}
+            }}
+          }}
+          reviewThreads(first: 100) {{
+            totalCount
+            nodes {{
+              id
+              isResolved
+              comments(first: 100) {{
+                nodes {{
+                  databaseId
+                }}
+              }}
+            }}
+          }}
+        }}
+      }}
+    }}
+    """
+
+    output = run_gh_command(
+        ["api", "graphql", "-f", f"query={graphql_query}"],
+        quiet=True,
+    )
+    if not output:
+        print(
+            "Warning: Could not fetch review rounds (gh returned no output).",
+            file=sys.stderr,
+        )
+        return []
+
+    try:
+        data = json.loads(output)
+        pull_request = data["data"]["repository"]["pullRequest"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        print(
+            "Warning: Could not parse review rounds response from gh.",
+            file=sys.stderr,
+        )
+        return []
+
+    if pull_request is None:
+        print(
+            f"Warning: PR #{pr_number} not found in {owner}/{repo}.",
+            file=sys.stderr,
+        )
+        return []
+
+    pr_title = pull_request.get("title", "No title")
+    pr_url = pull_request.get("url", "")
+
+    reviews_block = pull_request.get("reviews") or {}
+    reviews_total = reviews_block.get("totalCount", 0)
+    if reviews_total > 100:
+        print(
+            f"Warning: PR has {reviews_total} reviews; only the first 100 "
+            "were fetched.",
+            file=sys.stderr,
+        )
+
+    threads_block = pull_request.get("reviewThreads") or {}
+    threads_total = threads_block.get("totalCount", 0)
+    if threads_total > 100:
+        print(
+            f"Warning: PR has {threads_total} review threads; only the "
+            "first 100 were fetched.",
+            file=sys.stderr,
+        )
+
+    thread_lookup: dict[int, tuple[str, bool]] = {}
+    for thread in threads_block.get("nodes", []) or []:
+        t_id = thread.get("id") or ""
+        t_resolved = bool(thread.get("isResolved"))
+        for tc in (thread.get("comments") or {}).get("nodes", []) or []:
+            db_id = tc.get("databaseId")
+            if db_id is not None:
+                thread_lookup[db_id] = (t_id, t_resolved)
+
+    unmapped_warned = False
+
+    rounds: list[dict[str, Any]] = []
+    for node in reviews_block.get("nodes", []) or []:
+        state = node.get("state")
+        submitted_at = node.get("submittedAt")
+        if state == "PENDING" or submitted_at is None:
+            continue
+
+        author = node.get("author") or {}
+        review_user = author.get("login", "unknown")
+
+        comments_block = node.get("comments") or {}
+        comments_total = comments_block.get("totalCount", 0)
+        if comments_total > 100:
+            print(
+                f"Warning: Review {node.get('id', '?')} has {comments_total} "
+                "comments; only the first 100 were fetched.",
+                file=sys.stderr,
+            )
+
+        comments: list[dict[str, Any]] = []
+        for c in comments_block.get("nodes", []) or []:
+            c_author = c.get("author") or {}
+            c_id_raw = c.get("id") or ""
+            c_id_short = c_id_raw.split("_")[-1] if c_id_raw else ""
+
+            reply_to = c.get("replyTo") or {}
+            reply_to_raw = reply_to.get("id") or ""
+            in_reply_to_id = reply_to_raw.split("_")[-1] if reply_to_raw else None
+
+            commit = c.get("commit") or {}
+            original_commit = c.get("originalCommit") or {}
+
+            db_id = c.get("databaseId")
+            thread_id: str | None
+            if db_id is not None and db_id in thread_lookup:
+                thread_id, is_resolved = thread_lookup[db_id]
+            else:
+                thread_id = None
+                is_resolved = False
+                if not unmapped_warned:
+                    print(
+                        f"Warning: comment databaseId={db_id} not found in "
+                        "reviewThreads; thread state will be missing.",
+                        file=sys.stderr,
+                    )
+                    unmapped_warned = True
+
+            comments.append(
+                {
+                    "id": c_id_short,
+                    "body": c.get("body", ""),
+                    "path": c.get("path", ""),
+                    "line": c.get("line"),
+                    "start_line": c.get("startLine"),
+                    "original_line": c.get("originalLine"),
+                    "original_start_line": c.get("originalStartLine"),
+                    "user": c_author.get("login", "unknown"),
+                    "created_at": c.get("createdAt", ""),
+                    "url": c.get("url", ""),
+                    "diff_hunk": c.get("diffHunk", ""),
+                    "pr_number": pr_number,
+                    "pr_title": pr_title,
+                    "pr_url": pr_url,
+                    "thread_id": thread_id,
+                    "is_resolved": is_resolved,
+                    "in_reply_to_id": in_reply_to_id,
+                    "commit_id": commit.get("oid"),
+                    "original_commit_id": original_commit.get("oid"),
+                }
+            )
+
+        rounds.append(
+            {
+                "review_id": node.get("id", ""),
+                "database_id": node.get("databaseId"),
+                "state": state,
+                "submitted_at": submitted_at,
+                "user": review_user,
+                "body": node.get("body", ""),
+                "url": node.get("url", ""),
+                "pr_number": pr_number,
+                "pr_title": pr_title,
+                "pr_url": pr_url,
+                "comments": comments,
+            }
+        )
+
+    rounds.sort(key=lambda r: r["submitted_at"] or "")
+    return rounds

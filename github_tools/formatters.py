@@ -308,3 +308,107 @@ def format_pr_comments(comments: list[dict], json_output: bool = False) -> str:
             lines.append("")
 
     return "\n".join(lines)
+
+
+_REVIEW_STATE_ICONS = {
+    "APPROVED": "✅",
+    "CHANGES_REQUESTED": "❌",
+    "COMMENTED": "💬",
+    "DISMISSED": "🗑️",
+}
+
+
+def format_pr_review_rounds(rounds: list[dict], json_output: bool = False) -> str:
+    """Format PR review rounds for output.
+
+    Args:
+        rounds: List of round dicts as produced by ``get_pr_review_rounds``.
+        json_output: If True, return JSON; otherwise human-readable format.
+
+    Returns:
+        Formatted string output.
+    """
+    import json as json_module
+
+    if json_output:
+        return json_module.dumps(rounds, indent=2)
+
+    if not rounds:
+        return "No review rounds found."
+
+    first = rounds[0]
+    pr_number = first.get("pr_number", "?")
+    pr_title = first.get("pr_title", "unknown")
+    pr_url = first.get("pr_url", "")
+    total_comments = sum(len(r.get("comments", [])) for r in rounds)
+
+    lines = [
+        f"📝 Review Rounds for PR #{pr_number}: {pr_title} "
+        f"({len(rounds)} rounds, {total_comments} comments)",
+        "=" * 60,
+        f"URL: {pr_url}",
+        "",
+    ]
+
+    for idx, rd in enumerate(rounds, start=1):
+        state = rd.get("state", "")
+        icon = _REVIEW_STATE_ICONS.get(state, "📝")
+        user = rd.get("user", "unknown")
+        submitted_at = rd.get("submitted_at") or ""
+        date = format_date(submitted_at) if submitted_at else "Unknown date"
+        review_url = rd.get("url", "")
+        body = (rd.get("body") or "").strip()
+
+        lines.append(f"{icon} Round {idx} — {state} — {user} ({date})")
+        if review_url:
+            lines.append(f"  🔗 {review_url}")
+        if body:
+            lines.append(f"  💬 {body}")
+
+        comments = rd.get("comments", []) or []
+        if comments:
+            lines.append("  " + "-" * 30)
+            for c_idx, comment in enumerate(comments):
+                c_user = comment.get("user", "unknown")
+                c_body = (comment.get("body") or "").strip()
+                c_created = comment.get("created_at") or ""
+                c_date = format_date(c_created) if c_created else "Unknown date"
+
+                path = comment.get("path", "")
+                line = comment.get("line")
+                start_line = comment.get("start_line")
+                original_line = comment.get("original_line")
+                original_start_line = comment.get("original_start_line")
+                prefix = "✅ " if comment.get("is_resolved") else ""
+
+                if path:
+                    if start_line and line and start_line != line:
+                        lines.append(f"  {prefix}{path}:{start_line}-{line}")
+                    elif (
+                        original_start_line
+                        and original_line
+                        and original_start_line != original_line
+                    ):
+                        lines.append(
+                            f"  {prefix}{path}:{original_start_line}-{original_line}"
+                        )
+                    elif line:
+                        lines.append(f"  {prefix}{path}:{line}")
+                    elif original_line:
+                        lines.append(f"  {prefix}{path}:{original_line}")
+                    else:
+                        lines.append(f"  {prefix}{path}")
+                else:
+                    lines.append(f"  {prefix}(general review comment)")
+
+                lines.append(f"    👤 {c_user} ({c_date})")
+                lines.append(f"    💬 {c_body}")
+                comment_url = comment.get("url", "")
+                if comment_url:
+                    lines.append(f"    🔗 {comment_url}")
+                if c_idx < len(comments) - 1:
+                    lines.append("")
+
+        lines.append("")
+
+    return "\n".join(lines)

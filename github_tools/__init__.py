@@ -6,6 +6,7 @@ from .__main__ import main
 from .github_api import (
     analyze_events,
     get_commits_for_repo,
+    get_pr_review_rounds,
     get_pull_requests,
     get_recent_repos,
     get_user_events,
@@ -20,6 +21,7 @@ __all__ = [
     "get_commits_for_repo",
     "get_linear_issues",
     "get_monday_two_weeks_ago",
+    "get_pr_review_rounds",
     "get_pull_requests",
     "get_recent_repos",
     "get_user_events",

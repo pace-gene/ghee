@@ -1,8 +1,11 @@
 """Utility functions for GitHub Activity Analyzer."""
 
+import re
 import subprocess
 import sys
 from datetime import datetime, timedelta
+
+_PR_URL_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$")
 
 
 def get_monday_two_weeks_ago() -> datetime:
@@ -95,3 +98,54 @@ def get_git_repo_info() -> tuple[str, str] | None:
         return None
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
+
+
+def parse_pr_ref(pr_ref: str, repo_override: str | None = None) -> tuple[str, str, int]:
+    """Resolve a PR reference into ``(owner, repo, number)``.
+
+    Accepts either:
+      - A full PR URL: ``https://github.com/<owner>/<repo>/pull/<n>``
+      - A bare PR number: ``"123"``
+
+    For bare numbers, ``repo_override`` (format ``"owner/repo"``) is consulted
+    first; otherwise falls back to :func:`get_git_repo_info`. If a URL is given
+    and ``repo_override`` is also given, ``repo_override`` is ignored with a
+    stderr warning.
+
+    Raises:
+        ValueError: if the ref cannot be resolved.
+    """
+    ref = pr_ref.strip()
+
+    url_match = _PR_URL_RE.match(ref)
+    if url_match:
+        if repo_override is not None:
+            print(
+                "Warning: --repo is ignored when PR_REF is a full URL.",
+                file=sys.stderr,
+            )
+        owner, repo, number_str = url_match.groups()
+        return owner, repo, int(number_str)
+
+    if ref.isdigit():
+        number = int(ref)
+        if repo_override is not None:
+            parts = repo_override.split("/")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                raise ValueError(
+                    f"Invalid --repo value: {repo_override!r}. Expected OWNER/REPO."
+                )
+            return parts[0], parts[1], number
+
+        repo_info = get_git_repo_info()
+        if repo_info is None:
+            raise ValueError(
+                "Could not determine repository; pass --repo OWNER/REPO or "
+                "run inside a git clone."
+            )
+        return repo_info[0], repo_info[1], number
+
+    raise ValueError(
+        f"Unrecognised PR reference: {pr_ref}. "
+        "Expected a PR number or a github.com /pull/<n> URL."
+    )
