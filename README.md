@@ -329,6 +329,19 @@ If your agent already has the **GitHub MCP server**, `ghee` is a
 - **Opinionated shapes** — `pr-rounds` groups reviews into rounds and
   emits a stable, compact JSON schema built for downstream tooling.
 
+**`ghee pr-rounds` is specifically better at review history.** On a large
+PR (e.g. [`astral-sh/uv#19884`](https://github.com/astral-sh/uv/pull/19884),
+42 review rounds) `ghee pr-rounds` returns the whole thing in **one call** —
+each round's state, reviewer, timestamp, the **top-level review body**, and
+every inline comment correlated to its round with `file:line`, author,
+resolved status, and a permalink. The GitHub MCP needs **two separate
+methods** for the same picture (`get_reviews` + `get_review_comments`), both
+**paginated**, and they don't line up: review comments come back grouped by
+*thread*, not by *round*, so they have to be correlated by hand — and
+`get_reviews` doesn't return the review **body text** at all. That gap is
+exactly why an agent tends to bounce between calls (or fall back to raw
+`gh`) when reconstructing a PR's review history.
+
 **Prefer the GitHub MCP server when you want:**
 
 - One-off reads or rich navigation of a single PR / issue.
