@@ -307,6 +307,34 @@ cp -r skills/ghee ~/.cursor/skills/ghee
 Once installed, the agent will reach for `ghee` automatically when you ask
 about GitHub activity, PR comments, or review rounds.
 
+### ghee vs. the GitHub MCP server
+
+If your agent already has the **GitHub MCP server**, `ghee` is a
+*complement*, not a replacement. Reach for the right tool:
+
+**`ghee` shines when you want:**
+
+- **Cross-repo, date-ranged digests** — `ghee activity` assembles a
+  standup / retro / self-review across *all* your repos in a single call.
+  Doing this over MCP means fanning out across many search/list calls and
+  aggregating by hand.
+- **Linear in the mix** — the GitHub MCP doesn't touch Linear; `ghee`
+  folds those issues in.
+- **A ready-made AI narrative** — `ghee activity` can return a written
+  summary directly.
+- **Context efficiency** — one compact CLI result instead of many MCP
+  round-trips that fill up the agent's context window.
+- **Portability** — it's just a binary, so it works in a plain shell,
+  `cron`, or CI with `jq` pipelines, no MCP host required.
+- **Opinionated shapes** — `pr-rounds` groups reviews into rounds and
+  emits a stable, compact JSON schema built for downstream tooling.
+
+**Prefer the GitHub MCP server when you want:**
+
+- One-off reads or rich navigation of a single PR / issue.
+- **Write actions** — creating PRs, submitting reviews, resolving
+  threads. `ghee` is read-only by design.
+
 ---
 
 ## 📊 What you get
