@@ -48,6 +48,11 @@ messages, PR states (✅ merged / 🟡 open / ❌ draft), Linear issue
 states, and counts. If Gemini is configured, a narrative paragraph
 follows the raw activity.
 
+**Key semantics:**
+
+- **PR count:** Reports only PRs *authored* by the specified user, created in the date range. Reviewed or commented-on PRs are deliberately excluded — the count reflects "PRs I opened", not "PRs I touched".
+- **`--user` / `-u` flag:** Expects a **GitHub login** (e.g. `octocat`, `pace-gene`), not an email address. Invalid logins will silently produce zeroed activity; verify with `gh api users/{login}` if unsure.
+
 **Common patterns:**
 
 ```bash

@@ -149,6 +149,11 @@ uv run ghee activity --user octocat
 uv run ghee activity --no-ai-summary
 ```
 
+**What gets counted:**
+
+- **PRs:** Only PRs *authored* by the specified user (via `--user`/`-u`), created in the date range. Reviewed or commented-on PRs are deliberately excluded — the count reflects "PRs I opened", not "PRs I touched".
+- **`--user` / `-u`:** Expects a **GitHub login** (e.g. `octocat`, `pace-gene`), not an email address. Passing an invalid login will produce silently zeroed activity — use `gh api users/{login}` to verify a login exists.
+
 <details>
 <summary><b>CLI reference</b></summary>
 
