@@ -246,16 +246,19 @@ def analyze_events(events: list[dict], username: str) -> dict[str, list[dict]]:
 
         elif event_type == "PullRequestEvent":
             payload = event.get("payload", {})
-            pr = payload.get("pull_request", {})
-            categorized["pull_requests"].append(
-                {
-                    "number": pr.get("number"),
-                    "title": pr.get("title"),
-                    "state": pr.get("state"),
-                    "created_at": created_at,
-                    "repo": repo,
-                }
-            )
+            pr = payload.get("pull_request") or {}
+            pr_author = ((pr.get("user") or {}).get("login") or "")
+            # Only include PRs authored by the target user, and only if they have a number
+            if pr.get("number") and pr_author.casefold() == username.casefold():
+                categorized["pull_requests"].append(
+                    {
+                        "number": pr.get("number"),
+                        "title": pr.get("title"),
+                        "state": pr.get("state"),
+                        "created_at": created_at,
+                        "repo": repo,
+                    }
+                )
 
     return categorized
 

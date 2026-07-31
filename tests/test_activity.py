@@ -223,3 +223,209 @@ class TestActivityUserValidation:
         assert result.exit_code == 0
         # Verify canonical login was passed to get_user_events
         assert "pace-gene" in received_username
+
+
+class TestAnalyzeEventsPRAuthorFilter:
+    """Tests for PR author filtering in analyze_events()."""
+
+    def test_pr_authored_by_user_is_included(self) -> None:
+        """PR authored by target user should be included."""
+        from github_tools.github_api import analyze_events
+
+        events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "number": 1,
+                        "title": "My PR",
+                        "state": "open",
+                        "user": {"login": "pace-gene"},
+                    }
+                },
+            }
+        ]
+
+        result = analyze_events(events, "pace-gene")
+        assert len(result["pull_requests"]) == 1
+        assert result["pull_requests"][0]["number"] == 1
+        assert result["pull_requests"][0]["title"] == "My PR"
+
+    def test_pr_authored_by_user_case_insensitive(self) -> None:
+        """PR authored by target user (different case) should be included."""
+        from github_tools.github_api import analyze_events
+
+        events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "number": 1,
+                        "title": "My PR",
+                        "state": "open",
+                        "user": {"login": "PACE-Gene"},
+                    }
+                },
+            }
+        ]
+
+        result = analyze_events(events, "pace-gene")
+        assert len(result["pull_requests"]) == 1
+        assert result["pull_requests"][0]["number"] == 1
+
+    def test_pr_authored_by_different_user_is_excluded(self) -> None:
+        """PR authored by different user should be excluded."""
+        from github_tools.github_api import analyze_events
+
+        events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "number": 1,
+                        "title": "Someone else's PR",
+                        "state": "open",
+                        "user": {"login": "someone-else"},
+                    }
+                },
+            }
+        ]
+
+        result = analyze_events(events, "pace-gene")
+        assert len(result["pull_requests"]) == 0
+
+    def test_pr_with_missing_pull_request_payload_is_excluded(self) -> None:
+        """PR event with missing pull_request payload should be excluded."""
+        from github_tools.github_api import analyze_events
+
+        events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {},
+            }
+        ]
+
+        result = analyze_events(events, "pace-gene")
+        assert len(result["pull_requests"]) == 0
+
+    def test_pr_with_missing_user_is_excluded(self) -> None:
+        """PR event with missing user login should be excluded."""
+        from github_tools.github_api import analyze_events
+
+        events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "number": 1,
+                        "title": "PR with unknown author",
+                        "state": "open",
+                    }
+                },
+            }
+        ]
+
+        result = analyze_events(events, "pace-gene")
+        assert len(result["pull_requests"]) == 0
+
+    def test_pr_with_missing_number_is_excluded(self) -> None:
+        """PR event with missing number should be excluded."""
+        from github_tools.github_api import analyze_events
+
+        events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "title": "PR with no number",
+                        "state": "open",
+                        "user": {"login": "pace-gene"},
+                    }
+                },
+            }
+        ]
+
+        result = analyze_events(events, "pace-gene")
+        assert len(result["pull_requests"]) == 0
+
+    def test_print_activity_summary_deduplicates_prs_by_repo_number(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PR with same (repo, number) should be deduplicated, preferring API data."""
+        from github_tools.formatters import print_activity_summary
+        from github_tools.github_api import analyze_events
+
+        # Suppress output
+        monkeypatch.setattr("builtins.print", lambda *args, **kwargs: None)
+
+        # Create raw events: one duplicate and one foreign-authored
+        raw_events = [
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "number": 1,
+                        "title": "Event version (no author check)",
+                        "state": "open",
+                        "user": {"login": "pace-gene"},
+                    }
+                },
+            },
+            {
+                "type": "PullRequestEvent",
+                "repo": "org/repo",
+                "created_at": "2026-07-20T00:00:00Z",
+                "payload": {
+                    "pull_request": {
+                        "number": 2,
+                        "title": "Foreign authored PR",
+                        "state": "open",
+                        "user": {"login": "someone-else"},
+                    }
+                },
+            },
+        ]
+
+        # Filter events by author
+        events_summary = analyze_events(raw_events, "pace-gene")
+
+        commits: list[dict] = []
+        prs = [
+            {
+                "repo": "org/repo",
+                "number": 1,
+                "title": "Real title",
+                "state": "open",
+                "created_at": "2026-07-20T00:00:00Z",
+            }
+        ]
+
+        from datetime import datetime
+
+        result = print_activity_summary(
+            commits,
+            prs,
+            events_summary,
+            [],
+            datetime(2026, 7, 20),
+            datetime(2026, 7, 31),
+        )
+
+        # Should have 1 PR: the deduplicated one from API data (foreign PR filtered by author check)
+        assert len(result["prs"]) == 1
+        assert result["prs"][0]["number"] == 1
+        assert result["prs"][0]["title"] == "Real title"
