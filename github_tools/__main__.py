@@ -21,6 +21,7 @@ from .github_api import (
     get_unresolved_pr_comments,
     get_user_events,
     get_user_login,
+    resolve_user_login,
 )
 from .linear_api import get_linear_issues
 from .utils import get_git_repo_info, get_monday_two_weeks_ago, parse_pr_ref
@@ -77,7 +78,15 @@ def _run_activity(
 
     # Default --user to the authenticated GitHub login when omitted or blank.
     if github_user and github_user.strip():
-        username = github_user.strip()
+        canonical_login = resolve_user_login(github_user.strip())
+        if not canonical_login:
+            click.echo(
+                f"Error: GitHub user '{github_user.strip()}' not found. "
+                f"Pass a GitHub login (not an email address); check with 'gh api users/<login>'.",
+                err=True,
+            )
+            sys.exit(1)
+        username = canonical_login
     else:
         username = viewer_login
 
