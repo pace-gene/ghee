@@ -14,6 +14,23 @@ def get_user_login() -> str:
     return output
 
 
+def resolve_user_login(login: str) -> str:
+    """Validate a GitHub username and return the canonical login.
+
+    Args:
+        login: The GitHub username to validate
+
+    Returns:
+        The canonical login from the GitHub API, or empty string if not found
+    """
+    login = login.strip()
+    if not login:
+        return ""
+    return run_gh_command(
+        ["api", f"users/{login}", "--jq", ".login"], quiet=True
+    ).strip()
+
+
 def get_user_events(
     username: str, from_date: datetime, to_date: datetime
 ) -> list[dict[str, Any]]:
