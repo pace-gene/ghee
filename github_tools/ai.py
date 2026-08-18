@@ -9,7 +9,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 try:
-    import google.generativeai as genai
+    from google import genai
 except ImportError:
     genai = None
 
@@ -108,8 +108,7 @@ def get_gemini_summary(
         return None
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        client = genai.Client(api_key=api_key)
 
         # Use provided values or get defaults
         if current_date is None:
@@ -119,7 +118,9 @@ def get_gemini_summary(
 
         prompt = render_prompt(data_text, current_date, user_identity)
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite", contents=prompt
+        )
         return str(response.text) if response.text else None
 
     except Exception as e:

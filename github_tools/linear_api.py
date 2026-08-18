@@ -227,7 +227,7 @@ def get_linear_issues(from_date: datetime, to_date: datetime) -> list[dict[str, 
                                 "title": node.get("title", "Unknown"),
                                 "status": node.get("state", {}).get("name", "Unknown"),
                                 "updated_at": updated_at,
-                                "created_at": created_at,
+                                "created_at": created_at or "Unknown",
                                 "source": "linear",
                             }
                         )

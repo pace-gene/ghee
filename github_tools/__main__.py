@@ -27,7 +27,7 @@ from .linear_api import get_linear_issues
 from .utils import get_git_repo_info, get_monday_two_weeks_ago, parse_pr_ref
 
 try:
-    import google.generativeai as genai
+    from google import genai
 except ImportError:
     genai = None
 
@@ -128,7 +128,7 @@ def _run_activity(
         if not gemini_key:
             if genai is None:
                 click.echo(
-                    "\n💡 Tip: Install 'google-generativeai' "
+                    "\n💡 Tip: Install 'google-genai' "
                     "and set the 'gemini' API key in the config file for AI-powered summaries.",
                     err=True,
                 )
