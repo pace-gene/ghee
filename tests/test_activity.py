@@ -11,35 +11,41 @@ class TestResolveUserLogin:
     def test_valid_login_returns_canonical_login(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Valid login should return the canonical login from gh output."""
+        """Valid login should return the canonical login from the GitHub API."""
         from github_tools.github_api import resolve_user_login
 
         fake_calls = []
 
-        def fake_run_gh_command(cmd: list[str], quiet: bool = False) -> str:
-            fake_calls.append((cmd, quiet))
-            return "pace-gene"
+        class FakeUser:
+            login = "pace-gene"
+
+        class FakeClient:
+            def get_user(self, login: str) -> FakeUser:
+                fake_calls.append(login)
+                return FakeUser()
 
         monkeypatch.setattr(
-            "github_tools.github_api.run_gh_command", fake_run_gh_command
+            "github_tools.github_api.get_github_client", lambda: FakeClient()
         )
 
         result = resolve_user_login("PACE-Gene")
         assert result == "pace-gene"
-        assert len(fake_calls) == 1
-        assert fake_calls[0] == (["api", "users/PACE-Gene", "--jq", ".login"], True)
+        assert fake_calls == ["PACE-Gene"]
 
     def test_unknown_login_returns_empty_string(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Unknown login (empty gh output) should return empty string."""
+        """Unknown login (404 from GitHub) should return empty string."""
+        from github import GithubException
+
         from github_tools.github_api import resolve_user_login
 
-        def fake_run_gh_command(cmd: list[str], quiet: bool = False) -> str:
-            return ""
+        class FakeClient:
+            def get_user(self, login: str) -> None:
+                raise GithubException(404, {"message": "Not Found"}, {})
 
         monkeypatch.setattr(
-            "github_tools.github_api.run_gh_command", fake_run_gh_command
+            "github_tools.github_api.get_github_client", lambda: FakeClient()
         )
 
         result = resolve_user_login("nonexistent-user-xyz")
@@ -48,17 +54,17 @@ class TestResolveUserLogin:
     def test_whitespace_input_returns_empty_string_no_call(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Whitespace-only input should return empty string without calling gh."""
+        """Whitespace-only input should return empty string without calling GitHub."""
         from github_tools.github_api import resolve_user_login
 
         fake_calls = []
 
-        def fake_run_gh_command(cmd: list[str], quiet: bool = False) -> str:
-            fake_calls.append((cmd, quiet))
-            return "should-not-be-called"
+        def fake_get_github_client() -> None:
+            fake_calls.append(True)
+            raise AssertionError("should not be called")
 
         monkeypatch.setattr(
-            "github_tools.github_api.run_gh_command", fake_run_gh_command
+            "github_tools.github_api.get_github_client", fake_get_github_client
         )
 
         result = resolve_user_login("   ")
@@ -68,17 +74,17 @@ class TestResolveUserLogin:
     def test_empty_input_returns_empty_string_no_call(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Empty input should return empty string without calling gh."""
+        """Empty input should return empty string without calling GitHub."""
         from github_tools.github_api import resolve_user_login
 
         fake_calls = []
 
-        def fake_run_gh_command(cmd: list[str], quiet: bool = False) -> str:
-            fake_calls.append((cmd, quiet))
-            return "should-not-be-called"
+        def fake_get_github_client() -> None:
+            fake_calls.append(True)
+            raise AssertionError("should not be called")
 
         monkeypatch.setattr(
-            "github_tools.github_api.run_gh_command", fake_run_gh_command
+            "github_tools.github_api.get_github_client", fake_get_github_client
         )
 
         result = resolve_user_login("")
@@ -127,9 +133,7 @@ class TestActivityUserValidation:
             fake_calls["get_linear_issues"] += 1
             raise AssertionError("get_linear_issues should not be called")
 
-        monkeypatch.setattr(
-            "github_tools.__main__.get_user_login", fake_get_user_login
-        )
+        monkeypatch.setattr("github_tools.__main__.get_user_login", fake_get_user_login)
         monkeypatch.setattr(
             "github_tools.__main__.resolve_user_login", fake_resolve_user_login
         )
@@ -147,7 +151,9 @@ class TestActivityUserValidation:
         )
 
         runner = CliRunner()
-        result = runner.invoke(cli, ["activity", "--no-ai-summary", "-u", "gene.pasquet"])
+        result = runner.invoke(
+            cli, ["activity", "--no-ai-summary", "-u", "gene.pasquet"]
+        )
 
         assert result.exit_code == 1
         assert "gene.pasquet" in result.output
@@ -173,14 +179,18 @@ class TestActivityUserValidation:
         def fake_resolve_user_login(login: str) -> str:
             return "pace-gene"  # Valid user, return canonical
 
-        def fake_get_user_events(username: str, *args: object, **kwargs: object) -> list:
+        def fake_get_user_events(
+            username: str, *args: object, **kwargs: object
+        ) -> list:
             received_username.append(username)
             return []
 
         def fake_analyze_events(*args: object, **kwargs: object) -> dict:
             return {"commits": [], "pull_requests": []}
 
-        def fake_get_recent_repos(username: str, *args: object, **kwargs: object) -> list:
+        def fake_get_recent_repos(
+            username: str, *args: object, **kwargs: object
+        ) -> list:
             return []
 
         def fake_get_pull_requests(*args: object, **kwargs: object) -> list:
@@ -189,18 +199,14 @@ class TestActivityUserValidation:
         def fake_get_linear_issues(*args: object, **kwargs: object) -> list:
             return []
 
-        monkeypatch.setattr(
-            "github_tools.__main__.get_user_login", fake_get_user_login
-        )
+        monkeypatch.setattr("github_tools.__main__.get_user_login", fake_get_user_login)
         monkeypatch.setattr(
             "github_tools.__main__.resolve_user_login", fake_resolve_user_login
         )
         monkeypatch.setattr(
             "github_tools.__main__.get_user_events", fake_get_user_events
         )
-        monkeypatch.setattr(
-            "github_tools.__main__.analyze_events", fake_analyze_events
-        )
+        monkeypatch.setattr("github_tools.__main__.analyze_events", fake_analyze_events)
         monkeypatch.setattr(
             "github_tools.__main__.get_recent_repos", fake_get_recent_repos
         )
@@ -210,6 +216,7 @@ class TestActivityUserValidation:
         monkeypatch.setattr(
             "github_tools.__main__.get_linear_issues", fake_get_linear_issues
         )
+
         def fake_print_activity_summary(*args: object, **kwargs: object) -> dict:
             return {"commits": [], "prs": [], "linear_issues": []}
 

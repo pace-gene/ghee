@@ -118,9 +118,8 @@ def get_gemini_summary(
 
         prompt = render_prompt(data_text, current_date, user_identity)
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite", contents=prompt
-        )
+        chat = client.chats.create(model="gemini-2.5-flash-lite")
+        response = chat.send_message(prompt)
         return str(response.text) if response.text else None
 
     except Exception as e:

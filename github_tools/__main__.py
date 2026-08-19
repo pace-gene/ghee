@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 
 import click
+from tqdm import tqdm
 
 from .ai import get_gemini_summary, load_gemini_key
 from .formatters import (
@@ -92,30 +93,39 @@ def _run_activity(
 
     click.echo(f"🔍 Analyzing GitHub activity for user: {username}")
 
-    # Fetch activity data using multiple approaches
-    click.echo("📡 Fetching activity data...")
-
     # Get events (most reliable for recent activity)
+    click.echo("📡 Fetching events...")
     events = get_user_events(username, parsed_from_date, parsed_to_date)
     events_summary = analyze_events(events, username)
 
-    # Also try to get data directly from search APIs
+    # Repo list is needed to size the rest of the fetch plan (one step per
+    # repo's commits), so it runs up front. Repos not pushed to since
+    # parsed_from_date are filtered out (see get_recent_repos).
+    repos = get_recent_repos(username, viewer_login, parsed_from_date)
+
+    fetch_plan: list[tuple[str, str | None]] = [("commits", repo) for repo in repos]
+    fetch_plan.append(("pull_requests", None))
+    fetch_plan.append(("linear_issues", None))
+
     commits = []
-    repos = get_recent_repos(username, viewer_login)
+    prs: list[dict] = []
+    linear_issues: list[dict] = []
 
-    # Get commits from recent repos (limit to avoid rate limiting)
-    # Use quiet mode since 404s are expected for private/inaccessible repos
-    for repo in repos[:10]:
-        repo_commits = get_commits_for_repo(
-            repo, username, parsed_from_date, parsed_to_date
-        )
-        commits.extend(repo_commits)
-
-    prs = get_pull_requests(username, parsed_from_date, parsed_to_date)
-
-    # Get Linear issues
-    click.echo("📋 Fetching Linear issues...")
-    linear_issues = get_linear_issues(parsed_from_date, parsed_to_date)
+    click.echo("📡 Fetching activity data...")
+    with tqdm(fetch_plan, bar_format="{bar} {percentage:3.0f}%") as bar:
+        for kind, repo in bar:
+            if kind == "commits":
+                assert repo is not None
+                # Quiet failures expected: 404s for private/inaccessible repos.
+                commits.extend(
+                    get_commits_for_repo(
+                        repo, username, parsed_from_date, parsed_to_date
+                    )
+                )
+            elif kind == "pull_requests":
+                prs = get_pull_requests(username, parsed_from_date, parsed_to_date)
+            elif kind == "linear_issues":
+                linear_issues = get_linear_issues(parsed_from_date, parsed_to_date)
 
     # Print summary
     activity_data = print_activity_summary(

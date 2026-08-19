@@ -5,13 +5,18 @@ import sys
 from datetime import datetime
 from typing import Any
 
+from tqdm import tqdm
+
+from .github_client import get_github_client
 from .utils import run_gh_command
 
 
 def get_user_login() -> str:
     """Get the current user's GitHub login."""
-    output = run_gh_command(["api", "user", "--jq", ".login"])
-    return output
+    try:
+        return str(get_github_client().get_user().login)
+    except Exception:
+        return ""
 
 
 def resolve_user_login(login: str) -> str:
@@ -26,9 +31,10 @@ def resolve_user_login(login: str) -> str:
     login = login.strip()
     if not login:
         return ""
-    return run_gh_command(
-        ["api", f"users/{login}", "--jq", ".login"], quiet=True
-    ).strip()
+    try:
+        return str(get_github_client().get_user(login).login)
+    except Exception:
+        return ""
 
 
 def get_user_events(
@@ -38,35 +44,23 @@ def get_user_events(
     events = []
 
     try:
-        # Get user events (limited to last 90 days by GitHub API)
-        output = run_gh_command(
-            [
-                "api",
-                f"users/{username}/events",
-                "--paginate",
-                "--jq",
-                ".[] | {type: .type, created_at: .created_at, repo: .repo.name, payload: .payload}",
-            ]
-        )
+        # Get user events (limited to last 90 days / 300 events by GitHub API)
+        gh = get_github_client()
+        for event in gh.get_user(username).get_events():
+            event_date = event.created_at
+            if event_date.tzinfo is not None:
+                event_date = event_date.replace(tzinfo=None)
 
-        if output:
-            for line in output.split("\n"):
-                if line.strip():
-                    try:
-                        event = json.loads(line)
-                        event_date = datetime.fromisoformat(
-                            event["created_at"].replace("Z", "+00:00")
-                        )
-
-                        # Convert from_date and to_date to timezone-aware for comparison
-                        from_date_tz = from_date.replace(tzinfo=event_date.tzinfo)
-                        to_date_tz = to_date.replace(tzinfo=event_date.tzinfo)
-
-                        # Filter events within date range
-                        if from_date_tz <= event_date <= to_date_tz:
-                            events.append(event)
-                    except (json.JSONDecodeError, KeyError, ValueError):
-                        continue
+            # Filter events within date range
+            if from_date <= event_date <= to_date:
+                events.append(
+                    {
+                        "type": event.type,
+                        "created_at": event_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        "repo": event.repo.name if event.repo else "unknown",
+                        "payload": event.payload,
+                    }
+                )
 
     except Exception as e:
         print(f"Warning: Could not fetch events: {e}", file=sys.stderr)
@@ -74,32 +68,35 @@ def get_user_events(
     return events
 
 
-def get_recent_repos(username: str, viewer_login: str) -> list[str]:
+def get_recent_repos(
+    username: str, viewer_login: str, from_date: datetime | None = None
+) -> list[str]:
     """Get list of a user's recent repositories.
 
     Uses ``user/repos`` when ``username`` is the authenticated user (includes
     private repos they can access). Otherwise uses ``users/{username}/repos``
     (public repositories for that account).
+
+    When ``from_date`` is given, repos are sorted by most-recently-pushed and
+    the scan stops as soon as a repo's ``pushed_at`` falls before it — nobody
+    has pushed since, so this user can't have commits there either. Repos
+    with no pushes at all (``pushed_at`` is ``None``) are skipped outright.
     """
     repos = []
 
     try:
+        gh = get_github_client()
         if username.casefold() == viewer_login.casefold():
-            path = "user/repos"
+            repo_iter = gh.get_user().get_repos(sort="pushed", direction="desc")
         else:
-            path = f"users/{username}/repos"
+            repo_iter = gh.get_user(username).get_repos(sort="pushed", direction="desc")
 
-        output = run_gh_command(
-            [
-                "api",
-                path,
-                "--jq",
-                ".[].full_name",
-            ]
-        )
-
-        if output:
-            repos = [repo.strip() for repo in output.split("\n") if repo.strip()]
+        for r in repo_iter:
+            if r.pushed_at is None:
+                continue
+            if from_date is not None and r.pushed_at.replace(tzinfo=None) < from_date:
+                break
+            repos.append(r.full_name)
 
     except Exception as e:
         print(f"Warning: Could not fetch repositories: {e}", file=sys.stderr)
@@ -114,37 +111,31 @@ def get_commits_for_repo(
     commits = []
 
     try:
-        since = from_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-        until = to_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        output = run_gh_command(
-            [
-                "api",
-                f"repos/{repo}/commits",
-                "-f",
-                f"author={username}",
-                "-f",
-                f"since={since}",
-                "-f",
-                f"until={until}",
-                "--jq",
-                ".[] | {sha: .sha, message: .commit.message, date: .commit.author.date, author: .commit.author.name}",
-            ],
-            quiet=True,  # 404s are expected for private/inaccessible repos
+        gh = get_github_client()
+        repo_obj = gh.get_repo(repo)
+        repo_commits = repo_obj.get_commits(
+            author=username, since=from_date, until=to_date
         )
-
-        if output:
-            for line in output.split("\n"):
-                if line.strip():
-                    try:
-                        commit = json.loads(line)
-                        commit["repo"] = repo
-                        commits.append(commit)
-                    except json.JSONDecodeError:
-                        continue
+        for commit in tqdm(
+            repo_commits,
+            bar_format=f"  {repo} {{n_fmt}} commits",
+            leave=False,
+        ):
+            commit_author = commit.commit.author
+            commits.append(
+                {
+                    "sha": commit.sha,
+                    "message": commit.commit.message,
+                    "date": commit_author.date.strftime("%Y-%m-%dT%H:%M:%SZ")
+                    if commit_author
+                    else None,
+                    "author": commit_author.name if commit_author else None,
+                    "repo": repo,
+                }
+            )
 
     except Exception:
-        # Silently skip repos we can't access
+        # Silently skip repos we can't access (e.g. 404 on private/inaccessible repos)
         pass
 
     return commits
@@ -160,60 +151,29 @@ def get_pull_requests(
         from_date_str = from_date.strftime("%Y-%m-%d")
         to_date_str = to_date.strftime("%Y-%m-%d")
 
-        # Use search prs command which works better than search/issues
-        output = run_gh_command(
-            [
-                "search",
-                "prs",
-                "--author",
-                username,
-                "--created",
-                f"{from_date_str}..{to_date_str}",
-                "--json",
-                "number,title,state,createdAt,repository",
-                "--limit",
-                "100",
-            ]
-        )
+        gh = get_github_client()
+        query = f"is:pr author:{username} created:{from_date_str}..{to_date_str}"
 
-        if output:
-            try:
-                prs_data = json.loads(output)
-                for pr in prs_data:
-                    prs.append(
-                        {
-                            "number": pr.get("number"),
-                            "title": pr.get("title", "No title"),
-                            "state": pr.get("state"),
-                            "created_at": pr.get("createdAt"),
-                            "repo": pr.get("repository", {}).get(
-                                "nameWithOwner", "unknown"
-                            ),
-                            "url": None,  # Can be added if needed
-                        }
-                    )
-            except json.JSONDecodeError:
-                # Fallback to old method if search prs doesn't work
-                search_query = (
-                    f"author:{username} created:{from_date_str}..{to_date_str} is:pr"
-                )
-                output = run_gh_command(
-                    [
-                        "api",
-                        "search/issues",
-                        "-q",
-                        search_query,
-                        "--jq",
-                        '.items[] | {number: .number, title: .title, state: .state, created_at: .created_at, repo: .repository_url | split("/") | .[-2:] | join("/"), url: .html_url}',
-                    ]
-                )
-                if output:
-                    for line in output.split("\n"):
-                        if line.strip():
-                            try:
-                                prs.append(json.loads(line))
-                            except json.JSONDecodeError:
-                                continue
+        # GitHub's search API hard-caps at 1000 results regardless of client.
+        for i, issue in enumerate(gh.search_issues(query)):
+            if i >= 1000:
+                break
+            repo_url = issue.raw_data.get("repository_url", "")
+            repo_name = (
+                "/".join(repo_url.rstrip("/").split("/")[-2:])
+                if repo_url
+                else "unknown"
+            )
+            prs.append(
+                {
+                    "number": issue.number,
+                    "title": issue.title or "No title",
+                    "state": issue.state,
+                    "created_at": issue.created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "repo": repo_name,
+                    "url": issue.html_url,
+                }
+            )
 
     except Exception as e:
         print(f"Warning: Could not fetch pull requests: {e}", file=sys.stderr)
@@ -247,7 +207,7 @@ def analyze_events(events: list[dict], username: str) -> dict[str, list[dict]]:
         elif event_type == "PullRequestEvent":
             payload = event.get("payload", {})
             pr = payload.get("pull_request") or {}
-            pr_author = ((pr.get("user") or {}).get("login") or "")
+            pr_author = (pr.get("user") or {}).get("login") or ""
             # Only include PRs authored by the target user, and only if they have a number
             if pr.get("number") and pr_author.casefold() == username.casefold():
                 categorized["pull_requests"].append(
