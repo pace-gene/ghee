@@ -265,7 +265,35 @@ def activity(
     is_flag=True,
     help="Output as JSON instead of human-readable format",
 )
-def pr(json_output: bool) -> None:
+@click.option(
+    "--exclude-bot-comments",
+    "exclude_bots",
+    is_flag=True,
+    help="Drop comments from known bot accounts (noise control, not a security boundary).",
+)
+@click.option(
+    "--only-human",
+    "only_human",
+    is_flag=True,
+    help="Alias for --exclude-bot-comments.",
+)
+@click.option(
+    "--expand-details",
+    is_flag=True,
+    help="Leave <details> blocks in comment bodies uncollapsed.",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Redact directive-shaped content in comment bodies instead of just flagging it.",
+)
+def pr(
+    json_output: bool,
+    exclude_bots: bool,
+    only_human: bool,
+    expand_details: bool,
+    strict: bool,
+) -> None:
     """Fetch and list all unresolved PR comments for the current repository."""
     # Get git repo info
     repo_info = get_git_repo_info()
@@ -287,7 +315,14 @@ def pr(json_output: bool) -> None:
     comments = get_unresolved_pr_comments(owner, repo)
 
     # Format and output
-    output = format_pr_comments(comments, json_output=json_output)
+    output = format_pr_comments(
+        comments,
+        json_output=json_output,
+        exclude_bots=exclude_bots,
+        only_human=only_human,
+        strict=strict,
+        expand_details=expand_details,
+    )
     click.echo(output)
 
 
@@ -308,7 +343,37 @@ def pr(json_output: bool) -> None:
     is_flag=True,
     help="Output as JSON instead of human-readable format",
 )
-def pr_rounds(pr_ref: str, repo_override: str | None, json_output: bool) -> None:
+@click.option(
+    "--exclude-bot-comments",
+    "exclude_bots",
+    is_flag=True,
+    help="Drop reviews/comments from known bot accounts (noise control, not a security boundary).",
+)
+@click.option(
+    "--only-human",
+    "only_human",
+    is_flag=True,
+    help="Alias for --exclude-bot-comments.",
+)
+@click.option(
+    "--expand-details",
+    is_flag=True,
+    help="Leave <details> blocks in comment bodies uncollapsed.",
+)
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Redact directive-shaped content in comment bodies instead of just flagging it.",
+)
+def pr_rounds(
+    pr_ref: str,
+    repo_override: str | None,
+    json_output: bool,
+    exclude_bots: bool,
+    only_human: bool,
+    expand_details: bool,
+    strict: bool,
+) -> None:
     """Fetch review rounds (submitted reviews + their inline comments) for a PR.
 
     PR_REF can be a PR number (e.g. 123) or a full PR URL.
@@ -321,7 +386,14 @@ def pr_rounds(pr_ref: str, repo_override: str | None, json_output: bool) -> None
 
     click.echo(f"🔍 Fetching review rounds for {owner}/{repo}#{pr_number}...")
     rounds = get_pr_review_rounds(owner, repo, pr_number)
-    output = format_pr_review_rounds(rounds, json_output=json_output)
+    output = format_pr_review_rounds(
+        rounds,
+        json_output=json_output,
+        exclude_bots=exclude_bots,
+        only_human=only_human,
+        strict=strict,
+        expand_details=expand_details,
+    )
     click.echo(output)
 
 

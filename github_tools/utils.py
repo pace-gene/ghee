@@ -7,6 +7,110 @@ from datetime import datetime, timedelta
 
 _PR_URL_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)/?$")
 
+# --- Untrusted-body sanitization (prompt-injection hardening) ---
+#
+# Comment/review bodies come from arbitrary GitHub users and can contain
+# text shaped to look like harness/system instructions to an LLM agent
+# consuming ghee's output. sanitize_body() does not make content trustworthy
+# (a plainly worded malicious request survives it unchanged) — it strips
+# invisible/hidden-by-default carriers (HTML comments, <details>, zero-width
+# and bidi control chars, ANSI escapes) and flags directive-shaped text so a
+# human or agent can see it was flagged. See PROMPT-INJECTION-2026-09-14.md.
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+_DETAILS_RE = re.compile(
+    r"<details>\s*(?:<summary>(?P<summary>.*?)</summary>)?.*?</details>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+_ZERO_WIDTH_BIDI_RE = re.compile("[​‌‍‎‏‪‫‬‭‮⁦⁧⁨⁩﻿]")
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# Directive-shaped content signals. Each entry is (label, compiled pattern).
+# These are heuristics for flagging, never for silently deleting content.
+_DIRECTIVE_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("heading", re.compile(r"^#{1,3}\s", re.MULTILINE)),
+    (
+        "system/assistant/user framing",
+        re.compile(r"(?im)^\s*(system|assistant|user)\s*[:>]"),
+    ),
+    (
+        "harness-style tag",
+        re.compile(r"</?(system-reminder|instructions?)>", re.IGNORECASE),
+    ),
+    ("Prompt for AI Agents", re.compile(r"Prompt for AI Agents", re.IGNORECASE)),
+    ("agent mention", re.compile(r"@claude|@coderabbitai", re.IGNORECASE)),
+    (
+        "override phrasing",
+        re.compile(
+            r"ignore (all )?previous|disregard .* instructions|you are now|new instructions",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "tool-steering language",
+        re.compile(r"use the Bash tool|do not use the .* tool", re.IGNORECASE),
+    ),
+]
+
+_REDACTED_PLACEHOLDER = "[redacted: directive-shaped content]"
+
+
+def sanitize_body(
+    body: str, *, strict: bool = False, expand_details: bool = False
+) -> tuple[str, list[str]]:
+    """Sanitize an untrusted PR comment/review body before it reaches a consumer.
+
+    This does not make the content trustworthy — a plainly worded malicious
+    request survives unchanged. It strips hidden-by-default carriers
+    (HTML comments, <details> blocks, invisible/control characters) and
+    flags text shaped like harness/system directives.
+
+    Args:
+        body: Raw comment body text.
+        strict: If True, replace directive-shaped regions with a redaction
+            placeholder instead of leaving them in place (for pipelines
+            feeding agents unattended).
+        expand_details: If True, leave <details> blocks intact instead of
+            collapsing them to a one-line placeholder.
+
+    Returns:
+        (sanitized_body, warnings) where warnings is a list of short tags
+        naming what was detected (e.g. "Prompt for AI Agents").
+    """
+    text = body or ""
+    warnings: list[str] = []
+
+    # Normalise invisible/control characters first, before pattern matching.
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _ANSI_ESCAPE_RE.sub("", text)
+    text = _ZERO_WIDTH_BIDI_RE.sub("", text)
+
+    if _HTML_COMMENT_RE.search(text):
+        warnings.append("HTML comment")
+    text = _HTML_COMMENT_RE.sub("", text)
+
+    if not expand_details and _DETAILS_RE.search(text):
+        warnings.append("collapsed <details> block")
+
+        def _collapse(match: "re.Match[str]") -> str:
+            summary = match.group("summary")
+            return (
+                f"[collapsed: {summary.strip()}]" if summary else "[collapsed details]"
+            )
+
+        text = _DETAILS_RE.sub(_collapse, text)
+
+    for label, pattern in _DIRECTIVE_PATTERNS:
+        if pattern.search(text):
+            warnings.append(label)
+            if strict:
+                text = pattern.sub(_REDACTED_PLACEHOLDER, text)
+
+    return text.strip(), warnings
+
 
 def get_monday_two_weeks_ago() -> datetime:
     """Get the Monday from 2 weeks ago as default start date."""

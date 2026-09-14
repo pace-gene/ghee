@@ -606,7 +606,23 @@ class TestFormatPrReviewRounds:
     def test_format_rounds_json_roundtrip(self) -> None:
         rounds = [_make_round(comments=[_make_inline_comment()])]
         out = format_pr_review_rounds(rounds, json_output=True)
-        assert json.loads(out) == rounds
+        parsed = json.loads(out)
+        assert len(parsed) == len(rounds)
+        # Original fields survive untouched; sanitized fields are additive.
+        for original, enriched in zip(rounds, parsed, strict=True):
+            for key, value in original.items():
+                if key == "comments":
+                    continue
+                assert enriched[key] == value
+            assert "body_sanitized" in enriched
+            assert "warnings" in enriched
+            for c_original, c_enriched in zip(
+                original["comments"], enriched["comments"], strict=True
+            ):
+                for key, value in c_original.items():
+                    assert c_enriched[key] == value
+                assert "body_sanitized" in c_enriched
+                assert "warnings" in c_enriched
 
     def test_format_rounds_human_smoke(self) -> None:
         rounds = [_make_round(comments=[_make_inline_comment()])]
@@ -620,7 +636,8 @@ class TestFormatPrReviewRounds:
         assert "Round 1" in out
         assert "APPROVED" in out
         assert "alice" in out
-        assert "💬 LGTM" in out
+        assert "LGTM" in out
+        assert "💬 <<<comment by alice (untrusted) >>>" in out
         assert "src/main.py:42" in out
         assert "🔗 https://github.com/o/r/pull/7#pullrequestreview-1" in out
         assert "🔗 https://github.com/o/r/pull/7#discussion_r1" in out
@@ -688,7 +705,9 @@ class TestCliPrRounds:
             captured_args["pr_number"] = pr_number
             return [{"sentinel": True}]
 
-        def fake_formatter(rounds: list[dict], json_output: bool = False) -> str:
+        def fake_formatter(
+            rounds: list[dict], json_output: bool = False, **_kwargs: Any
+        ) -> str:
             captured_args["rounds"] = rounds
             captured_args["json_output"] = json_output
             return "FORMATTED"
@@ -728,7 +747,9 @@ class TestCliPrRounds:
         def fake_fetcher(owner: str, repo: str, pr_number: int) -> list[dict[str, Any]]:
             return []
 
-        def fake_formatter(rounds: list[dict], json_output: bool = False) -> str:
+        def fake_formatter(
+            rounds: list[dict], json_output: bool = False, **_kwargs: Any
+        ) -> str:
             captured_args["json_output"] = json_output
             return "[]"
 

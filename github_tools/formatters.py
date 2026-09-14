@@ -3,7 +3,40 @@
 from datetime import datetime
 from typing import Any
 
-from .utils import format_date
+from .utils import format_date, sanitize_body
+
+_BOT_SUFFIX = "[bot]"
+_KNOWN_BOTS = {"coderabbitai", "dependabot", "renovate"}
+
+
+def _is_bot(user: str) -> bool:
+    """Best-effort bot-account detection for --exclude-bot-comments/--only-human."""
+    u = (user or "").lower()
+    return u.endswith(_BOT_SUFFIX) or u in _KNOWN_BOTS
+
+
+def _filter_by_author(
+    items: list[dict], *, exclude_bots: bool, only_human: bool
+) -> list[dict]:
+    """Apply --exclude-bot-comments / --only-human. Noise control, not security."""
+    if not exclude_bots and not only_human:
+        return items
+    return [item for item in items if not _is_bot(item.get("user", ""))]
+
+
+def _fenced_body(
+    body: str, user: str, *, strict: bool = False, expand_details: bool = False
+) -> tuple[str, list[str]]:
+    """Sanitize and fence an untrusted body for human-readable output."""
+    clean, warnings = sanitize_body(body, strict=strict, expand_details=expand_details)
+    # Strip any occurrence of our own delimiter first so it cannot be closed early.
+    clean = clean.replace("<<<end comment>>>", "").replace("<<<comment", "")
+    fenced = (
+        f"<<<comment by {user} (untrusted) >>>\n{clean}\n<<<end comment>>>"
+        if clean
+        else clean
+    )
+    return fenced, warnings
 
 
 def print_activity_summary(
@@ -130,7 +163,13 @@ def format_data_for_gemini(
     from_date: datetime,
     to_date: datetime,
 ) -> str:
-    """Format GitHub activity data as text for Gemini prompt."""
+    """Format GitHub activity data as text for Gemini prompt.
+
+    Note: this currently only surfaces titles/commit messages, not comment
+    bodies. If comment bodies are ever added here, run them through
+    ``sanitize_body`` first — this text goes straight into an LLM prompt
+    (see PROMPT-INJECTION-2026-09-14.md).
+    """
     lines = [
         "GitHub Activity Data",
         f"Period: {from_date.strftime('%Y-%m-%d')} to {to_date.strftime('%Y-%m-%d')}",
@@ -208,20 +247,44 @@ def format_data_for_gemini(
     return "\n".join(lines)
 
 
-def format_pr_comments(comments: list[dict], json_output: bool = False) -> str:
+def format_pr_comments(
+    comments: list[dict],
+    json_output: bool = False,
+    *,
+    exclude_bots: bool = False,
+    only_human: bool = False,
+    strict: bool = False,
+    expand_details: bool = False,
+) -> str:
     """Format PR comments for output.
 
     Args:
         comments: List of comment dictionaries
         json_output: If True, return JSON; otherwise return human-readable format
+        exclude_bots: Drop comments from known bot accounts (noise control only).
+        only_human: Alias for exclude_bots.
+        strict: Redact directive-shaped regions in bodies instead of just flagging.
+        expand_details: Leave <details> blocks intact instead of collapsing them.
 
     Returns:
         Formatted string output
     """
     import json as json_module
 
+    comments = _filter_by_author(
+        comments, exclude_bots=exclude_bots, only_human=only_human
+    )
+
     if json_output:
-        return json_module.dumps(comments, indent=2)
+        enriched = []
+        for comment in comments:
+            sanitized, warnings = sanitize_body(
+                comment.get("body", ""), strict=strict, expand_details=expand_details
+            )
+            enriched.append(
+                {**comment, "body_sanitized": sanitized, "warnings": warnings}
+            )
+        return json_module.dumps(enriched, indent=2)
 
     if not comments:
         return "No unresolved PR comments found."
@@ -256,7 +319,12 @@ def format_pr_comments(comments: list[dict], json_output: bool = False) -> str:
 
         for comment in pr_comments:
             user = comment.get("user", "unknown")
-            body = comment.get("body", "").strip()
+            body, warnings = _fenced_body(
+                comment.get("body", ""),
+                user,
+                strict=strict,
+                expand_details=expand_details,
+            )
             created_at = comment.get("created_at") or comment.get("submitted_at", "")
 
             if created_at:
@@ -298,6 +366,10 @@ def format_pr_comments(comments: list[dict], json_output: bool = False) -> str:
 
             # Output full comment body
             lines.append(f"  👤 {user} ({date})")
+            if warnings:
+                lines.append(
+                    f"  ⚠️  body contains agent-directed text (matched: {', '.join(warnings)})"
+                )
             lines.append(f"  💬 {body}")
 
             # Add URL if available
@@ -318,20 +390,62 @@ _REVIEW_STATE_ICONS = {
 }
 
 
-def format_pr_review_rounds(rounds: list[dict], json_output: bool = False) -> str:
+def _enrich_round_json(rd: dict, *, strict: bool, expand_details: bool) -> dict:
+    body_sanitized, warnings = sanitize_body(
+        rd.get("body") or "", strict=strict, expand_details=expand_details
+    )
+    out: dict[str, Any] = {**rd, "body_sanitized": body_sanitized, "warnings": warnings}
+    comments = rd.get("comments") or []
+    if comments:
+        enriched_comments: list[dict[str, Any]] = []
+        for c in comments:
+            c_sanitized, c_warnings = sanitize_body(
+                c.get("body") or "", strict=strict, expand_details=expand_details
+            )
+            enriched_comments.append(
+                {**c, "body_sanitized": c_sanitized, "warnings": c_warnings}
+            )
+        out["comments"] = enriched_comments
+    return out
+
+
+def format_pr_review_rounds(
+    rounds: list[dict],
+    json_output: bool = False,
+    *,
+    exclude_bots: bool = False,
+    only_human: bool = False,
+    strict: bool = False,
+    expand_details: bool = False,
+) -> str:
     """Format PR review rounds for output.
 
     Args:
         rounds: List of round dicts as produced by ``get_pr_review_rounds``.
         json_output: If True, return JSON; otherwise human-readable format.
+        exclude_bots: Drop reviews/comments from known bot accounts (noise control only).
+        only_human: Alias for exclude_bots.
+        strict: Redact directive-shaped regions in bodies instead of just flagging.
+        expand_details: Leave <details> blocks intact instead of collapsing them.
 
     Returns:
         Formatted string output.
     """
     import json as json_module
 
+    rounds = _filter_by_author(rounds, exclude_bots=exclude_bots, only_human=only_human)
+    for rd in rounds:
+        if rd.get("comments"):
+            rd["comments"] = _filter_by_author(
+                rd["comments"], exclude_bots=exclude_bots, only_human=only_human
+            )
+
     if json_output:
-        return json_module.dumps(rounds, indent=2)
+        enriched = [
+            _enrich_round_json(rd, strict=strict, expand_details=expand_details)
+            for rd in rounds
+        ]
+        return json_module.dumps(enriched, indent=2)
 
     if not rounds:
         return "No review rounds found."
@@ -357,12 +471,18 @@ def format_pr_review_rounds(rounds: list[dict], json_output: bool = False) -> st
         submitted_at = rd.get("submitted_at") or ""
         date = format_date(submitted_at) if submitted_at else "Unknown date"
         review_url = rd.get("url", "")
-        body = (rd.get("body") or "").strip()
+        body, warnings = _fenced_body(
+            rd.get("body") or "", user, strict=strict, expand_details=expand_details
+        )
 
         lines.append(f"{icon} Round {idx} — {state} — {user} ({date})")
         if review_url:
             lines.append(f"  🔗 {review_url}")
         if body:
+            if warnings:
+                lines.append(
+                    f"  ⚠️  body contains agent-directed text (matched: {', '.join(warnings)})"
+                )
             lines.append(f"  💬 {body}")
 
         comments = rd.get("comments", []) or []
@@ -370,7 +490,12 @@ def format_pr_review_rounds(rounds: list[dict], json_output: bool = False) -> st
             lines.append("  " + "-" * 30)
             for c_idx, comment in enumerate(comments):
                 c_user = comment.get("user", "unknown")
-                c_body = (comment.get("body") or "").strip()
+                c_body, c_warnings = _fenced_body(
+                    comment.get("body") or "",
+                    c_user,
+                    strict=strict,
+                    expand_details=expand_details,
+                )
                 c_created = comment.get("created_at") or ""
                 c_date = format_date(c_created) if c_created else "Unknown date"
 
@@ -402,6 +527,10 @@ def format_pr_review_rounds(rounds: list[dict], json_output: bool = False) -> st
                     lines.append(f"  {prefix}(general review comment)")
 
                 lines.append(f"    👤 {c_user} ({c_date})")
+                if c_warnings:
+                    lines.append(
+                        f"    ⚠️  body contains agent-directed text (matched: {', '.join(c_warnings)})"
+                    )
                 lines.append(f"    💬 {c_body}")
                 comment_url = comment.get("url", "")
                 if comment_url:
